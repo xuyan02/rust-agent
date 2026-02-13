@@ -31,7 +31,7 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     let ctx = agent_core::AgentContextBuilder::new(&session).build()?;
-    let mut runner = agent_core::AgentRunner::new(agent_core::LlmAgent::new());
+    let mut runner = agent_core::AgentRunner::new(agent_core::ReCapAgent::new());
     let mut out = crate::console::StdoutRunnerConsole;
 
     if let Some(input) = args.input {

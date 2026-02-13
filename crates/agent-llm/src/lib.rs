@@ -102,6 +102,18 @@ impl OpenAiSender {
 #[async_trait(?Send)]
 impl LlmSender for OpenAiSender {
     async fn send(&mut self, messages: &[ChatMessage]) -> Result<ChatMessage> {
+        let debug_llm = std::env::var("AGENT_DEBUG_LLM")
+            .ok()
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false);
+
+        if debug_llm {
+            eprintln!("[LLM][request] provider=openai model={}", self.model);
+            for (i, m) in messages.iter().enumerate() {
+                eprintln!("[LLM][request][{}] {:?}: {:?}", i, m.role, m.content);
+            }
+        }
+
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -132,7 +144,14 @@ impl LlmSender for OpenAiSender {
             std::str::from_utf8(&resp.body).context("openai: response is not utf-8")?,
         )
         .context("openai: failed to parse response JSON")?;
-        crate::parse_chat_completions_response(&v)
+        let reply = crate::parse_chat_completions_response(&v)?;
+
+        if debug_llm {
+            eprintln!("[LLM][response] provider=openai model={}", self.model);
+            eprintln!("[LLM][response] {:?}: {:?}", reply.role, reply.content);
+        }
+
+        Ok(reply)
     }
 }
 
