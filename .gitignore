@@ -1,0 +1,5 @@
+.agent
+target
+
+# editor swap files
+*.swp
