@@ -1,4 +1,4 @@
-use agent_llm::{ChatMessage, build_chat_completions_body};
+use agent_core::llm::{ChatMessage, build_chat_completions_body};
 use anyhow::Result;
 
 #[test]

@@ -1,4 +1,4 @@
-use agent_tools::{DebugTool, Tool};
+use agent_core::tools::{DebugTool, Tool};
 use anyhow::Result;
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-use agent_runtime::{Console, Runtime};
+use agent_core::support::runtime::{Console, Runtime};
 
 struct CaptureConsole {
     out: String,

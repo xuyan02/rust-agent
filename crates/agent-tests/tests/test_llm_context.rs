@@ -1,4 +1,4 @@
-use agent_llm::{
+use agent_core::llm::{
     ChatContent, ChatMessage, ChatRole, LlmContext, LlmProvider, LlmRequest, LlmSender,
 };
 use anyhow::Result;

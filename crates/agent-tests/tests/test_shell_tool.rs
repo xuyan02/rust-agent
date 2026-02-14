@@ -1,4 +1,4 @@
-use agent_tools::{ShellTool, Tool};
+use agent_core::tools::{ShellTool, Tool};
 use anyhow::Result;
 
 #[tokio::test]

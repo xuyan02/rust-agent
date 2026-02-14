@@ -1,6 +1,6 @@
+use agent_core::llm::{ChatContent, ChatMessage, ChatRole};
+use agent_core::llm::{LlmProvider, LlmSender};
 use agent_core::{Agent, AgentContextBuilder, SessionBuilder};
-use agent_llm::{ChatContent, ChatMessage, ChatRole};
-use agent_llm::{LlmProvider, LlmSender};
 use anyhow::Result;
 
 struct AlwaysToolCallsSender;
@@ -45,7 +45,7 @@ async fn agent_tool_loop_aborts_after_max_rounds() -> Result<()> {
 
     let session = SessionBuilder::new(&runtime)
         .set_default_model("gpt-test".to_string())
-        .add_tool(Box::new(agent_tools::DebugTool::new()))
+        .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
     let ctx = AgentContextBuilder::new(&session).build()?;

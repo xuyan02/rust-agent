@@ -1,5 +1,5 @@
+use agent_core::llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use agent_core::{AgentContextBuilder, AgentRunner, RunnerConsole};
-use agent_llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use anyhow::Result;
 
 struct CaptureConsole {

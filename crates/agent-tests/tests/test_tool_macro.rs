@@ -1,9 +1,9 @@
-use agent_tools::Tool;
+use agent_core::tools::Tool;
 use anyhow::Result;
 
 #[tokio::test]
 async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
-    let t = agent_tools::MacroExampleTool;
+    let t = agent_core::tools::MacroExampleTool;
 
     let spec = t.spec();
     assert_eq!(spec.id, "macro_example");
@@ -34,7 +34,7 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
 
 #[tokio::test]
 async fn tool_macro_errors_are_stable() -> Result<()> {
-    let t = agent_tools::MacroExampleTool;
+    let t = agent_core::tools::MacroExampleTool;
     let ws = std::path::Path::new("/tmp");
 
     let err = t

@@ -1,5 +1,5 @@
+use agent_core::llm::ChatMessage;
 use agent_core::{History, InMemoryHistory};
-use agent_llm::ChatMessage;
 use anyhow::Result;
 
 #[tokio::test]

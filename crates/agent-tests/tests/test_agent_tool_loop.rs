@@ -1,5 +1,5 @@
+use agent_core::llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use agent_core::{AgentContextBuilder, AgentRunner, LlmAgent, SessionBuilder};
-use agent_llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 
@@ -89,7 +89,7 @@ async fn agent_tool_loop_appends_tool_calls_and_results() -> Result<()> {
 
     let session = SessionBuilder::new(&runtime)
         .set_default_model("fake".to_string())
-        .add_tool(Box::new(agent_tools::DebugTool::new()))
+        .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
     let ctx = AgentContextBuilder::new(&session).build()?;

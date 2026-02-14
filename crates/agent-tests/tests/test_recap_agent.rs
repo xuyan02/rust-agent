@@ -1,5 +1,5 @@
+use agent_core::llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use agent_core::{AgentContextBuilder, AgentRunner, ReCapAgent, SessionBuilder};
-use agent_llm::{ChatContent, ChatMessage, ChatRole, LlmProvider, LlmSender};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 

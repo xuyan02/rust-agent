@@ -1,4 +1,4 @@
-use agent_llm::{OpenAiStreamAccumulator, OpenAiStreamDelta};
+use agent_core::llm::{OpenAiStreamAccumulator, OpenAiStreamDelta};
 use anyhow::Result;
 
 #[test]

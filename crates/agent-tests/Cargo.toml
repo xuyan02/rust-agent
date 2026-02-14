@@ -7,10 +7,6 @@ publish = false
 
 [dev-dependencies]
 agent-core = { path = "../agent-core" }
-agent-json = { path = "../agent-json" }
-agent-llm = { path = "../agent-llm" }
-agent-runtime = { path = "../agent-runtime" }
-agent-tools = { path = "../agent-tools" }
 anyhow.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

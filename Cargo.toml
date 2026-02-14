@@ -2,16 +2,8 @@
 resolver = "2"
 members = [
   "crates/agent-cli",
-  "crates/agent-config",
-  "crates/agent-console",
   "crates/agent-core",
-  "crates/agent-http",
-  "crates/agent-json",
-  "crates/agent-llm", "crates/agent-runtime",
-  "crates/agent-skill",
-  "crates/agent-storage",
   "crates/agent-tests",
-  "crates/agent-tools",
   "crates/agent-macros",
 ]
 

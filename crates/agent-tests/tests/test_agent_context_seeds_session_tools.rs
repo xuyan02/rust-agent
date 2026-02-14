@@ -7,7 +7,7 @@ fn agent_context_build_seeds_tools_from_session_and_allows_overrides() -> Result
 
     let session = SessionBuilder::new(&runtime)
         .set_default_model("gpt-test".to_string())
-        .add_tool(Box::new(agent_tools::DebugTool::new()))
+        .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
     let ctx = AgentContextBuilder::new(&session).build()?;
