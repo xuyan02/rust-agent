@@ -9,6 +9,8 @@ dependencies = [
  "agent-core",
  "anyhow",
  "async-trait",
+ "serde",
+ "serde_yaml",
  "tokio",
 ]
 

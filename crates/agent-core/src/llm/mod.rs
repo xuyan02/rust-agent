@@ -1,11 +1,13 @@
 mod context;
 mod json;
 mod openai;
+mod openai_provider;
 mod openai_stream;
 mod tools_json;
 
 pub use context::{LlmContext, LlmProvider, LlmRequest};
 pub use openai::{build_chat_completions_body, parse_chat_completions_response};
+pub use openai_provider::OpenAiProvider;
 pub use openai_stream::{OpenAiStreamAccumulator, OpenAiStreamDelta, ToolCallDelta};
 pub use tools_json::tools_to_openai_json;
 

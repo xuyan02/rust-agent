@@ -25,7 +25,9 @@ pub struct Brain<'a> {
 
 impl<'a> Brain<'a> {
     pub fn new(runtime: &'a Runtime, agent: Box<dyn Agent>) -> Result<Self> {
-        let session = SessionBuilder::new(runtime).build()?;
+        let session = SessionBuilder::new(runtime)
+            .set_default_model("gpt-4o".to_string())
+            .build()?;
 
         Ok(Self {
             state: Some(State {
