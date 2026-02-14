@@ -13,12 +13,10 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
         .iter()
         .find(|f| f.name == "macro.echo")
         .unwrap();
-    assert_eq!(echo.parameters["type"].as_str(), Some("object"));
-    assert_eq!(
-        echo.parameters["additionalProperties"].as_bool(),
-        Some(false)
-    );
-    assert!(echo.parameters["properties"].get("text").is_some());
+    let params_json = echo.parameters.to_json_schema_value();
+    assert_eq!(params_json["type"].as_str(), Some("object"));
+    assert_eq!(params_json["additionalProperties"].as_bool(), Some(false));
+    assert!(params_json["properties"].get("text").is_some());
 
     let ws = std::path::Path::new("/tmp");
     let out = t

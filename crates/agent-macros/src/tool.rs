@@ -209,15 +209,11 @@ fn schema_for_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
             return Err(syn::Error::new(seg.span(), "Vec arg must be type"));
         };
         let inner_schema = schema_for_type(inner)?;
-        return Ok(quote!({
-            let mut m = serde_json::Map::new();
-            m.insert(
-                "type".to_string(),
-                serde_json::Value::String("array".to_string()),
-            );
-            m.insert("items".to_string(), #inner_schema);
-            serde_json::Value::Object(m)
-        }));
+        return Ok(
+            quote!(crate::tools::Schema::Array(crate::tools::ArraySchema {
+                items: Box::new(#inner_schema),
+            })),
+        );
     }
 
     // primitives
@@ -229,11 +225,13 @@ fn schema_for_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
                 .last()
                 .ok_or_else(|| syn::Error::new(tp.span(), "empty type path"))?;
             let t = seg.ident.to_string();
-            let json_type = match t.as_str() {
-                "String" => "string",
-                "bool" | "Bool" => "boolean",
-                "i64" | "i32" | "u64" | "u32" | "usize" | "isize" => "integer",
-                "f64" | "f32" => "number",
+            let schema = match t.as_str() {
+                "String" => quote!(crate::tools::Schema::String),
+                "bool" | "Bool" => quote!(crate::tools::Schema::Boolean),
+                "i64" | "i32" | "u64" | "u32" | "usize" | "isize" => {
+                    quote!(crate::tools::Schema::Integer)
+                }
+                "f64" | "f32" => quote!(crate::tools::Schema::Number),
                 _ => {
                     return Err(syn::Error::new(
                         tp.span(),
@@ -241,11 +239,7 @@ fn schema_for_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
                     ));
                 }
             };
-            Ok(quote!(serde_json::Value::Object({
-                let mut m = serde_json::Map::new();
-                m.insert("type".to_string(), serde_json::Value::String(#json_type.to_string()));
-                m
-            })))
+            Ok(schema)
         }
         _ => Err(syn::Error::new(ty.span(), "unsupported tool arg type")),
     }
@@ -425,33 +419,27 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
 
             let optional = is_option(&pat_ty.ty).is_some() || arg_attrs.default.is_some();
             if !optional {
-                required_pushes
-                    .push(quote!(required.push(serde_json::Value::String(#arg_name.to_string()));));
+                required_pushes.push(quote!(required.push(#arg_name.to_string());));
             }
         }
 
         let name = fa.name.clone();
 
         spec_fns.push(quote!({
-            let mut props = serde_json::Map::new();
+            let mut props = std::collections::BTreeMap::new();
             #(#props_inserts)*
 
             let mut required = Vec::new();
             #(#required_pushes)*
 
-            let mut params = serde_json::Map::new();
-            params.insert("type".to_string(), serde_json::Value::String("object".to_string()));
-            params.insert("properties".to_string(), serde_json::Value::Object(props));
-            params.insert("required".to_string(), serde_json::Value::Array(required));
-            params.insert(
-                "additionalProperties".to_string(),
-                serde_json::Value::Bool(false),
-            );
-
             crate::FunctionSpec {
                 name: #name.to_string(),
                 description: #desc.to_string(),
-                parameters: serde_json::Value::Object(params),
+                parameters: crate::tools::Schema::Object(crate::tools::ObjectSchema {
+                    properties: props,
+                    required,
+                    additional_properties: false,
+                }),
             }
         }));
     }

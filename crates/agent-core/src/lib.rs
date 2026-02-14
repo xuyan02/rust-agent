@@ -13,7 +13,7 @@ pub mod support;
 pub mod tools;
 
 // Provide a stable path for proc-macro generated code (it references crate::Tool/ToolSpec/etc.).
-pub use tools::{FunctionSpec, Tool, ToolCall, ToolSpec};
+pub use tools::{ArraySchema, FunctionSpec, ObjectSchema, Schema, Tool, ToolCall, ToolSpec};
 
 pub use agent::{Agent, LlmAgent};
 pub(crate) use agent::{ToolLoopOptions, run_tool_loop};

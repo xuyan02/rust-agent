@@ -4,18 +4,83 @@ mod shell;
 pub use macro_example::MacroExampleTool;
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionSpec {
     pub name: String,
     pub description: String,
-    pub parameters: Value,
+    pub parameters: Schema,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Schema {
+    Object(ObjectSchema),
+    Array(ArraySchema),
+    String,
+    Boolean,
+    Integer,
+    Number,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectSchema {
+    pub properties: BTreeMap<String, Schema>,
+    pub required: Vec<String>,
+    pub additional_properties: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArraySchema {
+    pub items: Box<Schema>,
+}
+
+impl Schema {
+    pub fn to_json_schema_value(&self) -> serde_json::Value {
+        match self {
+            Schema::Object(o) => {
+                let mut m = serde_json::Map::new();
+                m.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("object".to_string()),
+                );
+
+                let mut props = serde_json::Map::new();
+                for (k, v) in &o.properties {
+                    props.insert(k.clone(), v.to_json_schema_value());
+                }
+                m.insert("properties".to_string(), serde_json::Value::Object(props));
+
+                let req = o
+                    .required
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect::<Vec<_>>();
+                m.insert("required".to_string(), serde_json::Value::Array(req));
+
+                m.insert(
+                    "additionalProperties".to_string(),
+                    serde_json::Value::Bool(o.additional_properties),
+                );
+
+                serde_json::Value::Object(m)
+            }
+            Schema::Array(a) => serde_json::json!({
+                "type": "array",
+                "items": a.items.to_json_schema_value(),
+            }),
+            Schema::String => serde_json::json!({"type": "string"}),
+            Schema::Boolean => serde_json::json!({"type": "boolean"}),
+            Schema::Integer => serde_json::json!({"type": "integer"}),
+            Schema::Number => serde_json::json!({"type": "number"}),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolSpec {
     pub id: String,
     pub description: String,
@@ -78,11 +143,10 @@ impl Tool for DebugTool {
             functions: vec![FunctionSpec {
                 name: "debug.echo".to_string(),
                 description: "Echo input for debugging".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                    "required": ["text"],
-                    "additionalProperties": false
+                parameters: Schema::Object(ObjectSchema {
+                    properties: BTreeMap::from([("text".to_string(), Schema::String)]),
+                    required: vec!["text".to_string()],
+                    additional_properties: false,
                 }),
             }],
         })
@@ -151,11 +215,10 @@ impl Tool for ShellTool {
             functions: vec![FunctionSpec {
                 name: "shell.exec".to_string(),
                 description: "Execute a shell command (bash -lc) with cwd=workspace".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {"command": {"type": "string"}},
-                    "required": ["command"],
-                    "additionalProperties": false
+                parameters: Schema::Object(ObjectSchema {
+                    properties: BTreeMap::from([("command".to_string(), Schema::String)]),
+                    required: vec!["command".to_string()],
+                    additional_properties: false,
                 }),
             }],
         })
@@ -202,25 +265,23 @@ impl Tool for FileTool {
                 FunctionSpec {
                     name: "file.read".to_string(),
                     description: "Read a UTF-8 text file under workspace".to_string(),
-                    parameters: serde_json::json!({
-                        "type": "object",
-                        "properties": {"path": {"type": "string"}},
-                        "required": ["path"],
-                        "additionalProperties": false
+                    parameters: Schema::Object(ObjectSchema {
+                        properties: BTreeMap::from([("path".to_string(), Schema::String)]),
+                        required: vec!["path".to_string()],
+                        additional_properties: false,
                     }),
                 },
                 FunctionSpec {
                     name: "file.write".to_string(),
                     description: "Write a UTF-8 text file under workspace".to_string(),
-                    parameters: serde_json::json!({
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string"},
-                            "content": {"type": "string"},
-                            "overwrite": {"type": "boolean"}
-                        },
-                        "required": ["path", "content"],
-                        "additionalProperties": false
+                    parameters: Schema::Object(ObjectSchema {
+                        properties: BTreeMap::from([
+                            ("path".to_string(), Schema::String),
+                            ("content".to_string(), Schema::String),
+                            ("overwrite".to_string(), Schema::Boolean),
+                        ]),
+                        required: vec!["path".to_string(), "content".to_string()],
+                        additional_properties: false,
                     }),
                 },
             ],
