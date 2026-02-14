@@ -46,10 +46,7 @@ pub fn build_chat_completions_body(
                     "tool_call_id".to_string(),
                     Value::String(tool_call_id.clone()),
                 );
-                msg.insert(
-                    "content".to_string(),
-                    Value::String(agent_json::dump(result)?),
-                );
+                msg.insert("content".to_string(), Value::String(result.clone()));
             }
         }
 

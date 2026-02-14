@@ -10,7 +10,7 @@ pub async fn run(args: Args) -> Result<()> {
     let agent_dir = workspace.join(".agent");
     let cfg_path = agent_dir.join("agent.yaml");
 
-    let cfg = match agent_config::load_agent_config_yaml_async(&cfg_path).await {
+    let cfg = match agent_core::support::config::load_agent_config_yaml_async(&cfg_path).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to load config: {e:#}");

@@ -1,5 +1,5 @@
+use crate::llm::{ChatContent, ChatMessage};
 use crate::{AgentContext, find_tool_for_function, parse_tool_calls};
-use agent_llm::{ChatContent, ChatMessage};
 use anyhow::{Context, Result, bail};
 
 use async_trait::async_trait;
@@ -39,7 +39,7 @@ pub(crate) async fn run_tool_loop(
             .create_sender(ctx.session().default_model())?;
         let reply = sender.send(&messages).await?;
 
-        if reply.role != agent_llm::ChatRole::Assistant {
+        if reply.role != crate::llm::ChatRole::Assistant {
             bail!("tool_loop: reply role is not assistant");
         }
 

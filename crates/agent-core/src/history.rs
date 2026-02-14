@@ -1,5 +1,5 @@
 use crate::Result;
-use agent_llm::ChatMessage;
+use crate::llm::ChatMessage;
 use async_trait::async_trait;
 use std::cell::RefCell;
 

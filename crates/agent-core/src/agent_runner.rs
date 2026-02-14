@@ -1,5 +1,5 @@
+use crate::support::console::Console;
 use crate::{Agent, AgentContext, make_user_message};
-use agent_console::Console;
 use anyhow::Result;
 
 pub trait RunnerConsole {
@@ -44,10 +44,10 @@ impl<A: Agent> AgentRunner<A> {
         // Print latest assistant text, even if the most recent entries are tool call/results.
         let all = ctx.history().get_all().await?;
         for m in all.iter().rev() {
-            if m.role != agent_llm::ChatRole::Assistant {
+            if m.role != crate::llm::ChatRole::Assistant {
                 continue;
             }
-            if let agent_llm::ChatContent::Text(t) = &m.content {
+            if let crate::llm::ChatContent::Text(t) = &m.content {
                 console.print_line(t);
                 break;
             }

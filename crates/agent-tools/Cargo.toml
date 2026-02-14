@@ -5,12 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-json = { path = "../agent-json" }
-anyhow.workspace = true
-glob.workspace = true
-regex.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-walkdir.workspace = true
-tokio.workspace = true
-async-trait = "0.1"
+agent-core = { path = "../agent-core" }

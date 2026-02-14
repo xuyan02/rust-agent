@@ -7,7 +7,7 @@ pub struct Session<'a> {
     workspace_path: PathBuf,
     agent_path: PathBuf,
     default_model: String,
-    tools: Vec<Box<dyn agent_tools::Tool>>,
+    tools: Vec<Box<dyn crate::tools::Tool>>,
 }
 
 impl Session<'_> {
@@ -27,7 +27,7 @@ impl Session<'_> {
         &self.default_model
     }
 
-    pub fn tools(&self) -> &[Box<dyn agent_tools::Tool>] {
+    pub fn tools(&self) -> &[Box<dyn crate::tools::Tool>] {
         &self.tools
     }
 }
@@ -37,7 +37,7 @@ pub struct SessionBuilder<'a> {
     workspace_path: Option<PathBuf>,
     agent_path: Option<PathBuf>,
     default_model: Option<String>,
-    tools: Vec<Box<dyn agent_tools::Tool>>,
+    tools: Vec<Box<dyn crate::tools::Tool>>,
 }
 
 impl<'a> SessionBuilder<'a> {
@@ -68,7 +68,7 @@ impl<'a> SessionBuilder<'a> {
         self
     }
 
-    pub fn add_tool(mut self, tool: Box<dyn agent_tools::Tool>) -> Self {
+    pub fn add_tool(mut self, tool: Box<dyn crate::tools::Tool>) -> Self {
         self.tools.push(tool);
         self
     }

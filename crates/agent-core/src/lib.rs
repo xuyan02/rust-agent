@@ -8,6 +8,13 @@ mod runtime;
 mod session;
 mod tool_dispatch;
 
+pub mod llm;
+pub mod support;
+pub mod tools;
+
+// Provide a stable path for proc-macro generated code (it references crate::Tool/ToolSpec/etc.).
+pub use tools::{FunctionSpec, Tool, ToolCall, ToolSpec};
+
 pub use agent::{Agent, LlmAgent};
 pub(crate) use agent::{ToolLoopOptions, run_tool_loop};
 pub use agent_context::{AgentContext, AgentContextBuilder, make_user_message};

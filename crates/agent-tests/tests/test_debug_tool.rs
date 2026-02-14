@@ -9,6 +9,6 @@ async fn debug_tool_echo() -> Result<()> {
     let out = tool
         .invoke(std::path::Path::new("."), "debug.echo", &args)
         .await?;
-    assert_eq!(out.as_str(), Some("hello"));
+    assert_eq!(out, "hello");
     Ok(())
 }

@@ -5,11 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-http = { path = "../agent-http" }
-agent-json = { path = "../agent-json" }
-agent-tools = { path = "../agent-tools" }
-anyhow.workspace = true
-bytes.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-async-trait = "0.1"
+agent-core = { path = "../agent-core" }

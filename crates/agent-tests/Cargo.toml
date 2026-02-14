@@ -6,7 +6,6 @@ license.workspace = true
 publish = false
 
 [dev-dependencies]
-agent-config = { path = "../agent-config" }
 agent-core = { path = "../agent-core" }
 agent-json = { path = "../agent-json" }
 agent-llm = { path = "../agent-llm" }

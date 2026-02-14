@@ -37,7 +37,7 @@ impl OpenAiStreamAccumulator {
     ) -> Result<bool> {
         delta_out.tool_calls_delta.clear();
 
-        let root = agent_json::parse(line).with_context(|| "failed to parse stream line json")?;
+        let root = crate::json::parse(line).with_context(|| "failed to parse stream line json")?;
         let choices = root
             .get("choices")
             .and_then(|v| v.as_array())

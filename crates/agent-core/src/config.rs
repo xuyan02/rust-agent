@@ -1,6 +1,6 @@
+use crate::llm::OpenAiProviderConfig;
+use crate::support::config::AgentConfig;
 use crate::{Result, Runtime, RuntimeBuilder, Session, SessionBuilder};
-use agent_config::AgentConfig;
-use agent_llm::OpenAiProviderConfig;
 use std::path::PathBuf;
 
 pub fn session_from_agent_config<'a>(
@@ -13,9 +13,9 @@ pub fn session_from_agent_config<'a>(
         .set_workspace_path(workspace)
         .set_agent_path(agent_dir)
         .set_default_model(cfg.model)
-        .add_tool(Box::new(agent_tools::FileTool::new()))
-        .add_tool(Box::new(agent_tools::ShellTool::new()))
-        .add_tool(Box::new(agent_tools::DebugTool::new()))
+        .add_tool(Box::new(crate::tools::FileTool::new()))
+        .add_tool(Box::new(crate::tools::ShellTool::new()))
+        .add_tool(Box::new(crate::tools::DebugTool::new()))
         .build()
 }
 

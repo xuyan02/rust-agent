@@ -1,5 +1,5 @@
+use crate::llm::{ChatMessage, ChatRole};
 use crate::{Agent, AgentContext, ToolLoopOptions, run_tool_loop};
-use agent_llm::{ChatMessage, ChatRole};
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 
@@ -96,9 +96,9 @@ Do NOT include secrets. Do NOT include tool call JSON.".to_string(),
         }
 
         let text = match reply.content {
-            agent_llm::ChatContent::Text(t) => t,
-            agent_llm::ChatContent::ToolCalls(_) => bail!("recap: unexpected tool_calls"),
-            agent_llm::ChatContent::ToolResult { .. } => bail!("recap: unexpected tool result"),
+            crate::llm::ChatContent::Text(t) => t,
+            crate::llm::ChatContent::ToolCalls(_) => bail!("recap: unexpected tool_calls"),
+            crate::llm::ChatContent::ToolResult { .. } => bail!("recap: unexpected tool result"),
         };
 
         if self.debug_enabled() {
@@ -164,9 +164,9 @@ Return ONLY plain text with the same sections as before, but preserve long-term 
         }
 
         let text = match reply.content {
-            agent_llm::ChatContent::Text(t) => t,
-            agent_llm::ChatContent::ToolCalls(_) => bail!("recap_rollup: unexpected tool_calls"),
-            agent_llm::ChatContent::ToolResult { .. } => {
+            crate::llm::ChatContent::Text(t) => t,
+            crate::llm::ChatContent::ToolCalls(_) => bail!("recap_rollup: unexpected tool_calls"),
+            crate::llm::ChatContent::ToolResult { .. } => {
                 bail!("recap_rollup: unexpected tool result")
             }
         };

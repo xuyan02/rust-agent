@@ -11,10 +11,7 @@ async fn shell_tool_pwd_in_workspace() -> Result<()> {
 
     let args = serde_json::json!({"command": "pwd"});
     let out = tool.invoke(&workspace, "shell.exec", &args).await?;
-
-    assert_eq!(out["ok"].as_bool(), Some(true));
-    let output = out["data"]["output"].as_str().unwrap_or_default();
-    assert!(output.contains(&*workspace.to_string_lossy()));
+    assert!(out.contains(&*workspace.to_string_lossy()));
 
     let _ = tokio::fs::remove_dir_all(&workspace).await;
     Ok(())

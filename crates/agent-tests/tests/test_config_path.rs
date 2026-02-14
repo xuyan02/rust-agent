@@ -32,7 +32,7 @@ fn config_path_tilde_expansion_smoke() -> Result<()> {
     )?;
 
     // load by absolute path works
-    let cfg = agent_config::load_agent_config_yaml(&cfg_path)?;
+    let cfg = agent_core::support::config::load_agent_config_yaml(&cfg_path)?;
     assert_eq!(cfg.model, "test-model");
 
     // tilde expansion behavior (we mimic cpp test intent via helper)
@@ -50,7 +50,7 @@ fn config_path_tilde_expansion_smoke() -> Result<()> {
 
         let tilde_path = "~/agent-test-config-path/agent.yaml".to_string();
         let expanded = expand_tilde(&tilde_path);
-        let cfg2 = agent_config::load_agent_config_yaml(&expanded)?;
+        let cfg2 = agent_core::support::config::load_agent_config_yaml(&expanded)?;
         assert_eq!(cfg2.model, "test-model");
 
         let _ = fs::remove_dir_all(&home_tmp);

@@ -45,10 +45,7 @@ async fn runner_prints_last_assistant_text_even_if_tool_entries_follow() -> Resu
         .await;
     let _ = ctx
         .history()
-        .append(ChatMessage::tool_result(
-            "call_1".to_string(),
-            serde_json::json!({"ok":true}),
-        ))
+        .append(ChatMessage::tool_result("call_1".to_string(), "ok"))
         .await;
 
     let mut console = CaptureConsole { lines: vec![] };

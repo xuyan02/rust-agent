@@ -1,5 +1,5 @@
 use crate::Result;
-use agent_llm::{LlmProvider, LlmSender, OpenAiProviderConfig};
+use crate::llm::{LlmProvider, LlmSender, OpenAiProviderConfig};
 use anyhow::Context;
 
 pub struct Runtime {
@@ -19,7 +19,7 @@ impl Runtime {
             .openai
             .clone()
             .context("missing openai provider config")?;
-        let sender = agent_llm::create_openai_sender(openai, model.to_string())?;
+        let sender = crate::llm::create_openai_sender(openai, model.to_string())?;
         Ok(Box::new(sender))
     }
 }

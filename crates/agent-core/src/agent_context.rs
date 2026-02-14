@@ -1,6 +1,6 @@
+use crate::llm::ChatMessage;
+use crate::tools::Tool;
 use crate::{History, InMemoryHistory, Session};
-use agent_llm::ChatMessage;
-use agent_tools::Tool;
 
 pub struct AgentContext<'a> {
     session: &'a Session<'a>,

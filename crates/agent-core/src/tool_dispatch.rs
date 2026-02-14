@@ -1,5 +1,5 @@
 use crate::Result;
-use agent_tools::Tool;
+use crate::tools::Tool;
 use anyhow::{Context, bail};
 
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ pub(crate) fn parse_tool_calls(tool_calls: &serde_json::Value) -> Result<Vec<Par
             .and_then(|v| v.as_str())
             .context("tool_call missing function.arguments")?;
         let arguments =
-            agent_json::parse(args_str).context("failed to parse function.arguments")?;
+            crate::support::json::parse(args_str).context("failed to parse function.arguments")?;
 
         out.push(ParsedToolCall {
             id: id.to_string(),
