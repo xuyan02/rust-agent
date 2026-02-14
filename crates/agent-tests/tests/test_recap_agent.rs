@@ -36,7 +36,11 @@ struct RecordingSender {
 
 #[async_trait::async_trait(?Send)]
 impl LlmSender for RecordingSender {
-    async fn send(&mut self, messages: &[ChatMessage]) -> Result<ChatMessage> {
+    async fn send(
+        &mut self,
+        messages: &[ChatMessage],
+        _tools: &[&dyn agent_core::Tool],
+    ) -> Result<ChatMessage> {
         self.log.lock().unwrap().push(messages.to_vec());
 
         // 1st call: recap
@@ -65,7 +69,7 @@ async fn recap_agent_injects_recap_but_does_not_persist_it_in_history() -> Resul
         .set_default_model("fake".to_string())
         .build()?;
 
-    let ctx = AgentContextBuilder::new(&session).build()?;
+    let ctx = AgentContextBuilder::from_session(&session).build()?;
 
     struct CaptureConsole {
         last: Option<String>,

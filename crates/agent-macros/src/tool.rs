@@ -61,6 +61,15 @@ struct ToolFnArgs {
     description: Option<String>,
     hidden: bool,
     strict: bool,
+    args: Vec<ToolFnArgMeta>,
+}
+
+#[derive(Clone, Debug)]
+struct ToolFnArgMeta {
+    ident: String,
+    rename: Option<String>,
+    desc: Option<String>,
+    default: Option<syn::Expr>,
 }
 
 fn parse_tool_fn_args(attrs: &[Attribute]) -> syn::Result<Option<ToolFnArgs>> {
@@ -76,6 +85,7 @@ fn parse_tool_fn_args(attrs: &[Attribute]) -> syn::Result<Option<ToolFnArgs>> {
     let mut description: Option<String> = None;
     let mut hidden = false;
     let mut strict = true;
+    let mut args: Vec<ToolFnArgMeta> = Vec::new();
 
     for m in nested {
         match m {
@@ -99,6 +109,13 @@ fn parse_tool_fn_args(attrs: &[Attribute]) -> syn::Result<Option<ToolFnArgs>> {
                     return Err(syn::Error::new(nv.path.span(), "unknown #[tool_fn] arg"));
                 }
             }
+            Meta::List(list) => {
+                if list.path.is_ident("args") {
+                    args = parse_tool_fn_args_list(list.tokens.clone())?;
+                } else {
+                    return Err(syn::Error::new(list.path.span(), "unknown #[tool_fn] list"));
+                }
+            }
             Meta::Path(p) => {
                 if p.is_ident("hidden") {
                     hidden = true;
@@ -106,7 +123,6 @@ fn parse_tool_fn_args(attrs: &[Attribute]) -> syn::Result<Option<ToolFnArgs>> {
                     return Err(syn::Error::new(p.span(), "unknown #[tool_fn] flag"));
                 }
             }
-            other => return Err(syn::Error::new(other.span(), "invalid #[tool_fn] arg")),
         }
     }
 
@@ -117,23 +133,88 @@ fn parse_tool_fn_args(attrs: &[Attribute]) -> syn::Result<Option<ToolFnArgs>> {
         description,
         hidden,
         strict,
+        args,
     }))
 }
 
+fn parse_tool_fn_args_list(tokens: proc_macro2::TokenStream) -> syn::Result<Vec<ToolFnArgMeta>> {
+    // Syntax:
+    // args(
+    //   foo(default = 1, rename = "bar", desc = "..."),
+    //   baz(desc = "...")
+    // )
+    let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+    let metas = parser.parse2(tokens)?;
+
+    let mut out = Vec::new();
+
+    for m in metas {
+        let Meta::List(list) = m else {
+            return Err(syn::Error::new(m.span(), "invalid args(...) entry"));
+        };
+
+        let Some(ident) = list.path.get_ident() else {
+            return Err(syn::Error::new(list.path.span(), "arg name must be ident"));
+        };
+
+        let mut meta = ToolFnArgMeta {
+            ident: ident.to_string(),
+            rename: None,
+            desc: None,
+            default: None,
+        };
+
+        let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+        let nested = parser.parse2(list.tokens.clone())?;
+
+        for nm in nested {
+            match nm {
+                Meta::NameValue(nv) => {
+                    if nv.path.is_ident("rename") {
+                        meta.rename = Some(lit_to_string(&nv.value)?);
+                    } else if nv.path.is_ident("desc") {
+                        meta.desc = Some(lit_to_string(&nv.value)?);
+                    } else if nv.path.is_ident("default") {
+                        meta.default = Some(nv.value);
+                    } else {
+                        return Err(syn::Error::new(nv.path.span(), "unknown args(...) field"));
+                    }
+                }
+                other => return Err(syn::Error::new(other.span(), "invalid args(...) field")),
+            }
+        }
+
+        out.push(meta);
+    }
+
+    Ok(out)
+}
+
+#[derive(Clone, Debug, Default)]
 struct ToolArgAttrs {
     rename: Option<String>,
     desc: Option<String>,
     default: Option<syn::Expr>,
 }
 
-fn parse_tool_arg_attrs(attrs: &[Attribute]) -> syn::Result<ToolArgAttrs> {
-    let mut out = ToolArgAttrs {
-        rename: None,
-        desc: None,
-        default: None,
-    };
+fn tool_arg_attrs_for_param(
+    fa: &ToolFnArgs,
+    ident: &str,
+    param_attrs: &[Attribute],
+) -> syn::Result<ToolArgAttrs> {
+    // Prefer args(...) metadata from #[tool_fn], but allow legacy #[tool_arg(...)] on params
+    // for older call sites (until fully migrated).
+    if let Some(m) = fa.args.iter().find(|m| m.ident == ident) {
+        return Ok(ToolArgAttrs {
+            rename: m.rename.clone(),
+            desc: m.desc.clone(),
+            default: m.default.clone(),
+        });
+    }
 
-    let Some(attr) = attrs.iter().find(|a| a.path().is_ident("tool_arg")) else {
+    let mut out = ToolArgAttrs::default();
+
+    let Some(attr) = param_attrs.iter().find(|a| a.path().is_ident("tool_arg")) else {
         return Ok(out);
     };
 
@@ -160,8 +241,8 @@ fn parse_tool_arg_attrs(attrs: &[Attribute]) -> syn::Result<ToolArgAttrs> {
     Ok(out)
 }
 
-fn is_workspace_param(ty: &Type) -> bool {
-    // Accept &Path or &std::path::Path
+fn is_agent_context_param(ty: &Type) -> bool {
+    // Accept &AgentContext or &crate::AgentContext (including &AgentContext<'_>)
     let Type::Reference(r) = ty else { return false };
     let Type::Path(tp) = &*r.elem else {
         return false;
@@ -169,7 +250,7 @@ fn is_workspace_param(ty: &Type) -> bool {
     let Some(seg) = tp.path.segments.last() else {
         return false;
     };
-    seg.ident == "Path" && matches!(seg.arguments, PathArguments::None)
+    seg.ident == "AgentContext"
 }
 
 fn is_option(ty: &Type) -> Option<&Type> {
@@ -210,7 +291,7 @@ fn schema_for_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
         };
         let inner_schema = schema_for_type(inner)?;
         return Ok(
-            quote!(crate::tools::Schema::Array(crate::tools::ArraySchema {
+            quote!(crate::tools::TypeSpec::Array(crate::tools::ArraySpec {
                 items: Box::new(#inner_schema),
             })),
         );
@@ -226,12 +307,20 @@ fn schema_for_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
                 .ok_or_else(|| syn::Error::new(tp.span(), "empty type path"))?;
             let t = seg.ident.to_string();
             let schema = match t.as_str() {
-                "String" => quote!(crate::tools::Schema::String),
-                "bool" | "Bool" => quote!(crate::tools::Schema::Boolean),
+                "String" => quote!(crate::tools::TypeSpec::String(
+                    crate::tools::StringSpec::default()
+                )),
+                "bool" | "Bool" => quote!(crate::tools::TypeSpec::Boolean(
+                    crate::tools::BooleanSpec::default()
+                )),
                 "i64" | "i32" | "u64" | "u32" | "usize" | "isize" => {
-                    quote!(crate::tools::Schema::Integer)
+                    quote!(crate::tools::TypeSpec::Integer(
+                        crate::tools::IntegerSpec::default()
+                    ))
                 }
-                "f64" | "f32" => quote!(crate::tools::Schema::Number),
+                "f64" | "f32" => quote!(crate::tools::TypeSpec::Number(
+                    crate::tools::NumberSpec::default()
+                )),
                 _ => {
                     return Err(syn::Error::new(
                         tp.span(),
@@ -302,10 +391,15 @@ fn decode_expr_for_type(
     let get_required = quote!(
         args.get(#lit_name)
             .ok_or_else(|| anyhow::anyhow!("tool arg missing: {}", #lit_name))?
+            .clone()
     );
 
     let get_optional_with_default = if let Some(def) = default_expr {
-        quote!(args.get(#lit_name).unwrap_or(&serde_json::json!(#def)))
+        quote!({
+            // Avoid borrowing a temporary serde_json::Value.
+            let __tool_default = serde_json::json!(#def);
+            args.get(#lit_name).unwrap_or(&__tool_default).clone()
+        })
     } else {
         get_required
     };
@@ -313,8 +407,8 @@ fn decode_expr_for_type(
     let decode_value = decode_value_expr_for_type(ty)?;
 
     Ok(quote!({
-        let v = #get_optional_with_default;
-        #decode_value(v, #lit_name)?
+        let v: serde_json::Value = #get_optional_with_default;
+        #decode_value(&v, #lit_name)?
     }))
 }
 
@@ -402,8 +496,8 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
                 continue;
             };
 
-            // detect workspace injection
-            if is_workspace_param(&pat_ty.ty) {
+            // detect ctx injection
+            if is_agent_context_param(&pat_ty.ty) {
                 continue;
             }
 
@@ -411,11 +505,15 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
                 return Err(syn::Error::new(pat_ty.pat.span(), "tool arg must be ident"));
             };
 
-            let arg_attrs = parse_tool_arg_attrs(&pat_ty.attrs)?;
-            let arg_name = arg_attrs.rename.unwrap_or_else(|| ident.to_string());
+            let ident_s = ident.to_string();
+            let arg_attrs = tool_arg_attrs_for_param(fa, &ident_s, &pat_ty.attrs)?;
+            let arg_name = arg_attrs.rename.clone().unwrap_or(ident_s);
 
             let schema = schema_for_type(&pat_ty.ty)?;
-            props_inserts.push(quote!(props.insert(#arg_name.to_string(), #schema);));
+            props_inserts.push(quote!(props.push(crate::tools::PropertySpec {
+                name: #arg_name.to_string(),
+                ty: #schema,
+            });));
 
             let optional = is_option(&pat_ty.ty).is_some() || arg_attrs.default.is_some();
             if !optional {
@@ -426,7 +524,7 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
         let name = fa.name.clone();
 
         spec_fns.push(quote!({
-            let mut props = std::collections::BTreeMap::new();
+            let mut props = Vec::new();
             #(#props_inserts)*
 
             let mut required = Vec::new();
@@ -435,11 +533,11 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
             crate::FunctionSpec {
                 name: #name.to_string(),
                 description: #desc.to_string(),
-                parameters: crate::tools::Schema::Object(crate::tools::ObjectSchema {
+                parameters: crate::tools::ObjectSpec {
                     properties: props,
                     required,
                     additional_properties: false,
-                }),
+                },
             }
         }));
     }
@@ -453,21 +551,18 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
         let mut call_args = Vec::new();
         let mut decodes = Vec::new();
 
-        let mut seen_workspace = false;
+        let mut seen_ctx = false;
 
         for input in &f.sig.inputs {
             match input {
                 FnArg::Receiver(_) => {}
                 FnArg::Typed(pat_ty) => {
-                    if is_workspace_param(&pat_ty.ty) {
-                        if seen_workspace {
-                            return Err(syn::Error::new(
-                                pat_ty.ty.span(),
-                                "duplicate workspace param",
-                            ));
+                    if is_agent_context_param(&pat_ty.ty) {
+                        if seen_ctx {
+                            return Err(syn::Error::new(pat_ty.ty.span(), "duplicate ctx param"));
                         }
-                        seen_workspace = true;
-                        call_args.push(quote!(workspace));
+                        seen_ctx = true;
+                        call_args.push(quote!(ctx));
                         continue;
                     }
 
@@ -475,8 +570,9 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
                         return Err(syn::Error::new(pat_ty.pat.span(), "tool arg must be ident"));
                     };
 
-                    let arg_attrs = parse_tool_arg_attrs(&pat_ty.attrs)?;
-                    let arg_name = arg_attrs.rename.unwrap_or_else(|| ident.to_string());
+                    let ident_s = ident.to_string();
+                    let arg_attrs = tool_arg_attrs_for_param(fa, &ident_s, &pat_ty.attrs)?;
+                    let arg_name = arg_attrs.rename.clone().unwrap_or(ident_s);
 
                     let local = format_ident!("__tool_arg_{}", ident);
                     let decode = decode_expr_for_type(&arg_name, &pat_ty.ty, arg_attrs.default)?;
@@ -494,14 +590,15 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
             let FnArg::Typed(pat_ty) = input else {
                 continue;
             };
-            if is_workspace_param(&pat_ty.ty) {
+            if is_agent_context_param(&pat_ty.ty) {
                 continue;
             }
             let Pat::Ident(PatIdent { ident, .. }) = &*pat_ty.pat else {
                 continue;
             };
-            let arg_attrs = parse_tool_arg_attrs(&pat_ty.attrs)?;
-            let arg_name = arg_attrs.rename.unwrap_or_else(|| ident.to_string());
+            let ident_s = ident.to_string();
+            let arg_attrs = tool_arg_attrs_for_param(fa, &ident_s, &pat_ty.attrs)?;
+            let arg_name = arg_attrs.rename.clone().unwrap_or(ident_s);
             allowed_keys.push(arg_name);
         }
 
@@ -551,8 +648,8 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
 
     let tool_spec_ident = format_ident!("__AGENT_TOOL_SPEC_FOR_{}", type_ident_string(self_ty)?);
 
-    let id = args.id;
-    let description = args.description;
+    let id = syn::LitStr::new(&args.id, proc_macro2::Span::call_site());
+    let description = syn::LitStr::new(&args.description, proc_macro2::Span::call_site());
 
     let expanded = quote! {
         #imp
@@ -561,18 +658,24 @@ fn tool_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
         impl crate::Tool for #self_ty {
             fn spec(&self) -> &crate::ToolSpec {
                 static #tool_spec_ident: std::sync::OnceLock<crate::ToolSpec> = std::sync::OnceLock::new();
-                #tool_spec_ident.get_or_init(|| crate::ToolSpec {
-                    id: #id.to_string(),
-                    description: #description.to_string(),
-                    functions: vec![
+                #tool_spec_ident.get_or_init(|| {
+                    let id = String::from(#id);
+                    let description = String::from(#description);
+                    let functions = vec![
                         #(#spec_fns),*
-                    ],
+                    ];
+
+                    crate::ToolSpec {
+                        id,
+                        description,
+                        functions,
+                    }
                 })
             }
 
             async fn invoke(
                 &self,
-                workspace: &std::path::Path,
+                ctx: &crate::AgentContext<'_>,
                 function_name: &str,
                 args: &serde_json::Value,
             ) -> anyhow::Result<String> {

@@ -17,7 +17,16 @@ async fn shell_tool_rejects_substitution_and_redirection() -> Result<()> {
         "echo hi &",
     ] {
         let args = serde_json::json!({"command": cmd});
-        let err = tool.invoke(ws, "shell.exec", &args).await.unwrap_err();
+        let runtime = agent_core::RuntimeBuilder::new().build();
+        let session = agent_core::SessionBuilder::new(&runtime)
+            .set_workspace_path(ws.to_path_buf())
+            .build()
+            .unwrap();
+        let ctx = agent_core::AgentContextBuilder::from_session(&session)
+            .build()
+            .unwrap();
+
+        let err = tool.invoke(&ctx, "shell.exec", &args).await.unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("unsafe shell command"));
     }

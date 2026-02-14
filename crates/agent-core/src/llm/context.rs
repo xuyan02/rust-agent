@@ -8,38 +8,38 @@ pub trait LlmProvider: Send {
 
     fn create_sender(&self, model: &str) -> Result<Box<dyn LlmSender>>;
 
-    fn create_request(
-        &self,
+    fn create_request<'a>(
+        &'a self,
         model: &str,
         messages: Vec<ChatMessage>,
-        tools_json: Vec<serde_json::Value>,
-    ) -> Result<Box<dyn LlmRequest>> {
+        tools: Vec<&'a dyn crate::tools::Tool>,
+    ) -> Result<Box<dyn LlmRequest + 'a>> {
         let sender = self.create_sender(model)?;
         Ok(Box::new(SenderBackedRequest {
             sender,
             messages,
-            tools_json,
+            tools,
         }))
     }
 }
 
 #[async_trait(?Send)]
-pub trait LlmRequest: Send {
+pub trait LlmRequest {
     async fn run(&mut self) -> Result<ChatMessage>;
 }
 
-struct SenderBackedRequest {
+struct SenderBackedRequest<'a> {
     sender: Box<dyn LlmSender>,
     messages: Vec<ChatMessage>,
-    tools_json: Vec<serde_json::Value>,
+    tools: Vec<&'a dyn crate::tools::Tool>,
 }
 
 #[async_trait(?Send)]
-impl LlmRequest for SenderBackedRequest {
+impl LlmRequest for SenderBackedRequest<'_> {
     async fn run(&mut self) -> Result<ChatMessage> {
         let msgs = std::mem::take(&mut self.messages);
-        let _tools = std::mem::take(&mut self.tools_json);
-        self.sender.send(&msgs).await
+        let tools = std::mem::take(&mut self.tools);
+        self.sender.send(&msgs, tools.as_slice()).await
     }
 }
 
@@ -61,15 +61,15 @@ impl LlmContext {
         self.providers.push(provider);
     }
 
-    pub fn create(
-        &self,
+    pub fn create<'a>(
+        &'a self,
         model: &str,
         messages: Vec<ChatMessage>,
-        tools_json: Vec<serde_json::Value>,
-    ) -> Option<Result<Box<dyn LlmRequest>>> {
+        tools: Vec<&'a dyn crate::tools::Tool>,
+    ) -> Option<Result<Box<dyn LlmRequest + 'a>>> {
         for p in &self.providers {
             if p.supports_model(model) {
-                return Some(p.create_request(model, messages, tools_json));
+                return Some(p.create_request(model, messages, tools));
             }
         }
         None

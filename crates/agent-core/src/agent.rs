@@ -1,6 +1,7 @@
 use crate::llm::{ChatContent, ChatMessage};
 use crate::{AgentContext, find_tool_for_function, parse_tool_calls};
 use anyhow::{Context, Result, bail};
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 
@@ -9,7 +10,7 @@ pub trait Agent: Send {
     async fn run(&mut self, ctx: &AgentContext<'_>) -> Result<()>;
 }
 
-pub(crate) struct ToolLoopOptions {
+pub struct ToolLoopOptions {
     pub max_tool_rounds: usize,
 }
 
@@ -21,7 +22,7 @@ impl Default for ToolLoopOptions {
     }
 }
 
-pub(crate) async fn run_tool_loop(
+pub async fn run_tool_loop(
     ctx: &AgentContext<'_>,
     mut messages: Vec<ChatMessage>,
     opts: ToolLoopOptions,
@@ -37,7 +38,9 @@ pub(crate) async fn run_tool_loop(
             .session()
             .runtime()
             .create_sender(ctx.session().default_model())?;
-        let reply = sender.send(&messages).await?;
+
+        let tools = ctx.tools();
+        let reply = sender.send(&messages, tools.as_slice()).await?;
 
         if reply.role != crate::llm::ChatRole::Assistant {
             bail!("tool_loop: reply role is not assistant");
@@ -63,22 +66,14 @@ pub(crate) async fn run_tool_loop(
                 }
 
                 for c in calls {
-                    let tool = find_tool_for_function(
-                        ctx.tools(),
-                        ctx.session().tools(),
-                        &c.function_name,
-                    )
-                    .with_context(|| {
-                        format!("tool_loop: no tool for function: {}", c.function_name)
-                    })?;
+                    let tools = ctx.tools();
+                    let tool = find_tool_for_function(tools.as_slice(), &c.function_name)
+                        .with_context(|| {
+                            format!("tool_loop: no tool for function: {}", c.function_name)
+                        })?;
 
-                    let result = tool
-                        .invoke(
-                            ctx.session().workspace_path(),
-                            &c.function_name,
-                            &c.arguments,
-                        )
-                        .await?;
+                    let result = tool.invoke(ctx, &c.function_name, &c.arguments).await?;
+                    let result = maybe_spool_tool_output(ctx, &c.function_name, result).await?;
 
                     let tool_result = ChatMessage::tool_result(c.id, result);
                     let _ = ctx.history().append(tool_result.clone()).await;
@@ -93,6 +88,55 @@ pub(crate) async fn run_tool_loop(
 }
 
 pub struct LlmAgent;
+
+async fn maybe_spool_tool_output(
+    ctx: &AgentContext<'_>,
+    function_name: &str,
+    output: String,
+) -> Result<String> {
+    const MAX_CHARS: usize = 8 * 1024;
+    const PREVIEW_LINES: usize = 80;
+
+    if output.len() <= MAX_CHARS {
+        return Ok(output);
+    }
+
+    let spool_dir = ctx.session().agent_path().join("spool");
+    tokio::fs::create_dir_all(&spool_dir)
+        .await
+        .with_context(|| format!("failed to create spool dir: {}", spool_dir.display()))?;
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let safe_fn = function_name.replace(['/', '.', ':'], "_");
+    let filename = format!("{ts}_{safe_fn}.log");
+    let abs: PathBuf = spool_dir.join(filename);
+
+    tokio::fs::write(&abs, output.as_bytes())
+        .await
+        .with_context(|| format!("failed to write spool file: {}", abs.display()))?;
+
+    let mut preview = String::new();
+    for (i, line) in output.lines().take(PREVIEW_LINES).enumerate() {
+        if i > 0 {
+            preview.push('\n');
+        }
+        preview.push_str(line);
+    }
+
+    Ok(format!(
+        "{preview}\n\n[tool output truncated: {} chars; full output saved to {}]\n\
+To read more: file.read {{\"path\": \"{}\", \"offset_lines\": 0, \"limit_lines\": 200}}",
+        output.len(),
+        abs.display(),
+        abs.strip_prefix(ctx.session().workspace_path())
+            .unwrap_or(&abs)
+            .display()
+    ))
+}
 
 impl LlmAgent {
     pub fn new() -> Self {

@@ -10,7 +10,7 @@ pub async fn run(args: Args) -> Result<()> {
     let agent_dir = workspace.join(".agent");
     let cfg_path = agent_dir.join("agent.yaml");
 
-    let cfg = match agent_core::support::config::load_agent_config_yaml_async(&cfg_path).await {
+    let cfg = match crate::config::load_agent_config_yaml_async(&cfg_path).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to load config: {e:#}");
@@ -21,16 +21,31 @@ pub async fn run(args: Args) -> Result<()> {
 
     eprintln!("workspace_path: {}", workspace.display());
 
-    let runtime = agent_core::runtime_from_agent_config(&cfg);
-    let session =
-        agent_core::session_from_agent_config(&runtime, cfg, workspace.clone(), agent_dir.clone())?;
+    let mut runtime_builder = agent_core::RuntimeBuilder::new();
+    if let Some(o) = &cfg.openai {
+        runtime_builder = runtime_builder.set_openai(agent_core::llm::OpenAiProviderConfig {
+            base_url: o.base_url.clone(),
+            api_key: o.api_key.clone(),
+            model_provider_id: o.model_provider_id.clone(),
+        });
+    }
+    let runtime = runtime_builder.build();
+
+    let session = agent_core::SessionBuilder::new(&runtime)
+        .set_workspace_path(workspace.clone())
+        .set_agent_path(agent_dir.clone())
+        .set_default_model(cfg.model)
+        .add_tool(Box::new(agent_core::tools::FileTool::new()))
+        .add_tool(Box::new(agent_core::tools::ShellTool::new()))
+        .add_tool(Box::new(agent_core::tools::DebugTool::new()))
+        .build()?;
 
     if session.default_model().is_empty() {
         eprintln!("error: missing default model");
         std::process::exit(1);
     }
 
-    let ctx = agent_core::AgentContextBuilder::new(&session).build()?;
+    let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
     let mut runner = agent_core::AgentRunner::new(agent_core::ReCapAgent::new());
     let mut out = crate::console::StdoutRunnerConsole;
 

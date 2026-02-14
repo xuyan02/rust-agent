@@ -10,7 +10,7 @@ fn agent_context_build_seeds_tools_from_session_and_allows_overrides() -> Result
         .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
-    let ctx = AgentContextBuilder::new(&session).build()?;
+    let ctx = AgentContextBuilder::from_session(&session).build()?;
     assert!(
         ctx.session().tools().iter().any(|t| t
             .spec()

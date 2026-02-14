@@ -23,7 +23,11 @@ impl LlmProvider for TestProvider {
 
 #[async_trait::async_trait(?Send)]
 impl LlmSender for AlwaysToolCallsSender {
-    async fn send(&mut self, _messages: &[ChatMessage]) -> Result<ChatMessage> {
+    async fn send(
+        &mut self,
+        _messages: &[ChatMessage],
+        _tools: &[&dyn agent_core::Tool],
+    ) -> Result<ChatMessage> {
         Ok(ChatMessage {
             role: ChatRole::Assistant,
             content: ChatContent::ToolCalls(serde_json::json!([
@@ -48,7 +52,7 @@ async fn agent_tool_loop_aborts_after_max_rounds() -> Result<()> {
         .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
-    let ctx = AgentContextBuilder::new(&session).build()?;
+    let ctx = AgentContextBuilder::from_session(&session).build()?;
     let _ = ctx
         .history()
         .append(agent_core::make_user_message("hi".to_string()))

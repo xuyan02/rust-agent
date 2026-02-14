@@ -32,7 +32,11 @@ struct AssertSystemFirstSender;
 
 #[async_trait::async_trait(?Send)]
 impl LlmSender for AssertSystemFirstSender {
-    async fn send(&mut self, messages: &[ChatMessage]) -> Result<ChatMessage> {
+    async fn send(
+        &mut self,
+        messages: &[ChatMessage],
+        _tools: &[&dyn agent_core::Tool],
+    ) -> Result<ChatMessage> {
         assert!(!messages.is_empty());
         assert_eq!(messages[0].role, ChatRole::System);
         match &messages[0].content {
@@ -54,7 +58,7 @@ async fn system_segments_are_prefixed_to_llm_messages() -> Result<()> {
         .set_default_model("fake".to_string())
         .build()?;
 
-    let ctx = AgentContextBuilder::new(&session)
+    let ctx = AgentContextBuilder::from_session(&session)
         .add_system_segment("sys-1".to_string())
         .build()?;
 

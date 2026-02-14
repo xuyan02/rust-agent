@@ -13,7 +13,7 @@ fn parse_calls(v: serde_json::Value) -> Result<Vec<(String, String, serde_json::
             .unwrap()
             .to_string();
         let args = fn_obj.get("arguments").and_then(|v| v.as_str()).unwrap();
-        out.push((id, name, agent_core::support::json::parse(args)?));
+        out.push((id, name, serde_json::from_str(args)?));
     }
     Ok(out)
 }

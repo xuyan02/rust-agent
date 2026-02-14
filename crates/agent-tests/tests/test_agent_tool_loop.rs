@@ -41,7 +41,11 @@ struct FakeSender {
 
 #[async_trait::async_trait(?Send)]
 impl LlmSender for FakeSender {
-    async fn send(&mut self, messages: &[ChatMessage]) -> Result<ChatMessage> {
+    async fn send(
+        &mut self,
+        messages: &[ChatMessage],
+        _tools: &[&dyn agent_core::Tool],
+    ) -> Result<ChatMessage> {
         let mut n = self.calls.lock().unwrap();
         *n += 1;
 
@@ -92,7 +96,7 @@ async fn agent_tool_loop_appends_tool_calls_and_results() -> Result<()> {
         .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
 
-    let ctx = AgentContextBuilder::new(&session).build()?;
+    let ctx = AgentContextBuilder::from_session(&session).build()?;
 
     struct CaptureConsole {
         last: Option<String>,

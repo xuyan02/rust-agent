@@ -39,8 +39,9 @@ pub(crate) fn parse_tool_calls(tool_calls: &serde_json::Value) -> Result<Vec<Par
             .get("arguments")
             .and_then(|v| v.as_str())
             .context("tool_call missing function.arguments")?;
-        let arguments =
-            crate::support::json::parse(args_str).context("failed to parse function.arguments")?;
+        let arguments = serde_json::from_str(args_str)
+            .context("failed to parse json")
+            .context("failed to parse function.arguments")?;
 
         out.push(ParsedToolCall {
             id: id.to_string(),
@@ -52,21 +53,14 @@ pub(crate) fn parse_tool_calls(tool_calls: &serde_json::Value) -> Result<Vec<Par
     Ok(out)
 }
 
-pub(crate) fn find_tool_for_function<'a>(
-    ctx_tools: &'a [Box<dyn Tool>],
-    session_tools: &'a [Box<dyn Tool>],
+pub fn find_tool_for_function<'a>(
+    tools: &'a [&'a dyn Tool],
     function_name: &str,
 ) -> Option<&'a dyn Tool> {
-    // Later-added tools win.
-    for t in ctx_tools.iter().rev() {
+    // Earlier tools win (AgentContext::tools() yields local-first).
+    for t in tools {
         if t.spec().functions.iter().any(|f| f.name == function_name) {
-            return Some(t.as_ref());
-        }
-    }
-
-    for t in session_tools.iter().rev() {
-        if t.spec().functions.iter().any(|f| f.name == function_name) {
-            return Some(t.as_ref());
+            return Some(*t);
         }
     }
 

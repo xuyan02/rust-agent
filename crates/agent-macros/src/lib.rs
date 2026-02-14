@@ -24,9 +24,11 @@ pub fn tool_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 
-/// Mark a parameter for a `#[tool_fn]` method.
 #[proc_macro_attribute]
-pub fn tool_arg(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Marker attribute: we parse it later from the method signature.
+pub fn tool_arg(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // This attribute is a marker consumed by #[tool] while expanding the impl.
+    // It must *not* remain as an attribute macro on the parameter, otherwise rustc
+    // will reject it as "expected non-macro attribute".
+    let _ = attr;
     item
 }

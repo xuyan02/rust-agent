@@ -10,7 +10,12 @@ async fn shell_tool_pwd_in_workspace() -> Result<()> {
     let tool = ShellTool::new();
 
     let args = serde_json::json!({"command": "pwd"});
-    let out = tool.invoke(&workspace, "shell.exec", &args).await?;
+    let runtime = agent_core::RuntimeBuilder::new().build();
+    let session = agent_core::SessionBuilder::new(&runtime)
+        .set_workspace_path(workspace.clone())
+        .build()?;
+    let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
+    let out = tool.invoke(&ctx, "shell.exec", &args).await?;
     assert!(out.contains(&*workspace.to_string_lossy()));
 
     let _ = tokio::fs::remove_dir_all(&workspace).await;

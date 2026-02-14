@@ -89,7 +89,7 @@ Do NOT include secrets. Do NOT include tool call JSON.".to_string(),
             .session()
             .runtime()
             .create_sender(ctx.session().default_model())?;
-        let reply = sender.send(&messages).await?;
+        let reply = sender.send(&messages, &[]).await?;
 
         if reply.role != ChatRole::Assistant {
             bail!("recap: reply role is not assistant");
@@ -157,7 +157,7 @@ Return ONLY plain text with the same sections as before, but preserve long-term 
             .session()
             .runtime()
             .create_sender(ctx.session().default_model())?;
-        let reply = sender.send(&messages).await?;
+        let reply = sender.send(&messages, &[]).await?;
 
         if reply.role != ChatRole::Assistant {
             bail!("recap_rollup: reply role is not assistant");

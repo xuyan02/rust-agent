@@ -6,6 +6,9 @@ use std::path::Path;
 pub struct OpenAiProviderConfig {
     pub base_url: String,
     pub api_key: String,
+
+    #[serde(default)]
+    pub model_provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -18,16 +21,6 @@ pub async fn load_agent_config_yaml_async(path: impl AsRef<Path>) -> Result<Agen
     let path = path.as_ref();
     let bytes = tokio::fs::read(path)
         .await
-        .with_context(|| format!("failed to read config: {}", path.display()))?;
-    let cfg: AgentConfig = serde_yaml::from_slice(&bytes)
-        .with_context(|| format!("failed to parse yaml: {}", path.display()))?;
-    Ok(cfg)
-}
-
-pub fn load_agent_config_yaml(path: impl AsRef<Path>) -> Result<AgentConfig> {
-    // Sync helper (tests/one-off); prefer async in main code paths.
-    let path = path.as_ref();
-    let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read config: {}", path.display()))?;
     let cfg: AgentConfig = serde_yaml::from_slice(&bytes)
         .with_context(|| format!("failed to parse yaml: {}", path.display()))?;

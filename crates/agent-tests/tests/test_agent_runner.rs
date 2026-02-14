@@ -27,7 +27,7 @@ async fn runner_prints_last_assistant_text_even_if_tool_entries_follow() -> Resu
     let session = agent_core::SessionBuilder::new(&runtime)
         .set_default_model("fake".to_string())
         .build()?;
-    let ctx = agent_core::AgentContextBuilder::new(&session).build()?;
+    let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
 
     let mut runner = AgentRunner::new(NoopAgent);
 

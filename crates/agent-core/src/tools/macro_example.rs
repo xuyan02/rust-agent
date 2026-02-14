@@ -16,7 +16,7 @@ impl MacroExampleTool {
     }
 
     #[tool_fn(name = "macro.pwd")]
-    pub async fn pwd(&self, workspace: &std::path::Path) -> Result<String> {
-        Ok(workspace.to_string_lossy().to_string())
+    pub async fn pwd(&self, ctx: &crate::AgentContext<'_>) -> Result<String> {
+        Ok(ctx.session().workspace_path().to_string_lossy().to_string())
     }
 }

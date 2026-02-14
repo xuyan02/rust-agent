@@ -51,12 +51,12 @@ impl LlmProvider for FakeProvider {
         anyhow::bail!("not used")
     }
 
-    fn create_request(
-        &self,
+    fn create_request<'a>(
+        &'a self,
         model: &str,
         messages: Vec<ChatMessage>,
-        _tools_json: Vec<serde_json::Value>,
-    ) -> Result<Box<dyn LlmRequest>> {
+        _tools: Vec<&'a dyn agent_core::Tool>,
+    ) -> Result<Box<dyn LlmRequest + 'a>> {
         self.events
             .lock()
             .unwrap()
