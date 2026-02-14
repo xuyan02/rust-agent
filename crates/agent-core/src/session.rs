@@ -8,6 +8,8 @@ pub struct Session<'a> {
     agent_path: PathBuf,
     default_model: String,
     tools: Vec<Box<dyn crate::tools::Tool>>,
+    system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
+    history: Box<dyn crate::History + 'a>,
 }
 
 impl Session<'_> {
@@ -30,6 +32,14 @@ impl Session<'_> {
     pub fn tools(&self) -> &[Box<dyn crate::tools::Tool>] {
         &self.tools
     }
+
+    pub fn system_prompt_segments(&self) -> &[Box<dyn crate::SystemPromptSegment>] {
+        &self.system_prompt_segments
+    }
+
+    pub fn history(&self) -> &(dyn crate::History + '_) {
+        self.history.as_ref()
+    }
 }
 
 pub struct SessionBuilder<'a> {
@@ -38,6 +48,8 @@ pub struct SessionBuilder<'a> {
     agent_path: Option<PathBuf>,
     default_model: Option<String>,
     tools: Vec<Box<dyn crate::tools::Tool>>,
+    system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
+    history: Option<Box<dyn crate::History + 'a>>,
 }
 
 impl<'a> SessionBuilder<'a> {
@@ -48,6 +60,8 @@ impl<'a> SessionBuilder<'a> {
             agent_path: None,
             default_model: None,
             tools: vec![],
+            system_prompt_segments: vec![],
+            history: None,
         }
     }
 }
@@ -73,6 +87,16 @@ impl<'a> SessionBuilder<'a> {
         self
     }
 
+    pub fn add_system_prompt_segment(mut self, seg: Box<dyn crate::SystemPromptSegment>) -> Self {
+        self.system_prompt_segments.push(seg);
+        self
+    }
+
+    pub fn set_history(mut self, history: Box<dyn crate::History + 'a>) -> Self {
+        self.history = Some(history);
+        self
+    }
+
     pub fn build(self) -> Result<Session<'a>> {
         let workspace_path = self
             .workspace_path
@@ -82,12 +106,18 @@ impl<'a> SessionBuilder<'a> {
             .unwrap_or_else(|| workspace_path.join(".agent"));
         let default_model = self.default_model.unwrap_or_default();
 
+        let history = self
+            .history
+            .unwrap_or_else(|| Box::new(crate::InMemoryHistory::new()));
+
         Ok(Session {
             runtime: self.runtime,
             workspace_path,
             agent_path,
             default_model,
             tools: self.tools,
+            system_prompt_segments: self.system_prompt_segments,
+            history,
         })
     }
 }

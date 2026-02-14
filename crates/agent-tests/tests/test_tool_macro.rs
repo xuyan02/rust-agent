@@ -11,7 +11,7 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
     let echo = spec
         .functions
         .iter()
-        .find(|f| f.name == "macro.echo")
+        .find(|f| f.name == "macro-echo")
         .unwrap();
     let params_json = echo.parameters.to_json_schema_value();
     assert_eq!(params_json["type"].as_str(), Some("object"));
@@ -25,11 +25,11 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
 
     let out = t
-        .invoke(&ctx, "macro.echo", &serde_json::json!({"text": "hi"}))
+        .invoke(&ctx, "macro-echo", &serde_json::json!({"text": "hi"}))
         .await?;
     assert_eq!(out, "hi");
 
-    let out = t.invoke(&ctx, "macro.pwd", &serde_json::json!({})).await?;
+    let out = t.invoke(&ctx, "macro-pwd", &serde_json::json!({})).await?;
     assert_eq!(out, "/tmp");
 
     Ok(())
@@ -46,13 +46,13 @@ async fn tool_macro_errors_are_stable() -> Result<()> {
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
 
     let err = t
-        .invoke(&ctx, "macro.echo", &serde_json::json!({}))
+        .invoke(&ctx, "macro-echo", &serde_json::json!({}))
         .await
         .unwrap_err();
     assert!(err.to_string().contains("tool arg missing: text"));
 
     let err = t
-        .invoke(&ctx, "macro.echo", &serde_json::json!({"text": 1}))
+        .invoke(&ctx, "macro-echo", &serde_json::json!({"text": 1}))
         .await
         .unwrap_err();
     assert!(err.to_string().contains("tool arg type mismatch: text"));
@@ -60,7 +60,7 @@ async fn tool_macro_errors_are_stable() -> Result<()> {
     let err = t
         .invoke(
             &ctx,
-            "macro.echo",
+            "macro-echo",
             &serde_json::json!({"text": "hi", "x": 1}),
         )
         .await

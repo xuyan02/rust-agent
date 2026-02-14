@@ -10,7 +10,7 @@ async fn debug_tool_echo() -> Result<()> {
     let session = agent_core::SessionBuilder::new(&runtime).build()?;
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
 
-    let out = tool.invoke(&ctx, "debug.echo", &args).await?;
+    let out = tool.invoke(&ctx, "debug-echo", &args).await?;
     assert_eq!(out, "hello");
     Ok(())
 }

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use tokio::io::AsyncBufReadExt;
 
+use agent_core::Agent;
+
 pub struct Args {
     pub input: Option<String>,
 }
@@ -46,11 +48,12 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
-    let mut runner = agent_core::AgentRunner::new(agent_core::ReCapAgent::new());
-    let mut out = crate::console::StdoutRunnerConsole;
 
     if let Some(input) = args.input {
-        runner.run_line(&ctx, &mut out, input).await?;
+        ctx.history()
+            .append(agent_core::make_user_message(input))
+            .await?;
+        agent_core::LlmAgent::new().run(&ctx).await?;
         return Ok(());
     }
 
@@ -65,7 +68,10 @@ pub async fn run(args: Args) -> Result<()> {
             continue;
         }
 
-        runner.run_line(&ctx, &mut out, trimmed.to_string()).await?;
+        ctx.history()
+            .append(agent_core::make_user_message(trimmed.to_string()))
+            .await?;
+        agent_core::LlmAgent::new().run(&ctx).await?;
     }
 
     Ok(())

@@ -8,7 +8,7 @@ mod tool;
 /// ```ignore
 /// #[tool(id="debug", description="Debug utilities")]
 /// impl DebugTool {
-///     #[tool_fn(name="debug.echo")]
+///     #[tool_fn(name="debug-echo")]
 ///     async fn echo(&self, text: String) -> anyhow::Result<String> { ... }
 /// }
 /// ```

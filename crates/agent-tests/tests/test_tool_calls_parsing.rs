@@ -25,7 +25,7 @@ fn tool_calls_parsing_smoke() -> Result<()> {
         "id": "call_1",
         "type": "function",
         "function": {
-          "name": "file.read",
+          "name": "file-read",
           "arguments": "{\"path\":\"README.md\"}"
         }
       }
@@ -34,7 +34,7 @@ fn tool_calls_parsing_smoke() -> Result<()> {
     let calls = parse_calls(tool_calls)?;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "call_1");
-    assert_eq!(calls[0].1, "file.read");
+    assert_eq!(calls[0].1, "file-read");
     assert_eq!(calls[0].2["path"].as_str(), Some("README.md"));
     Ok(())
 }

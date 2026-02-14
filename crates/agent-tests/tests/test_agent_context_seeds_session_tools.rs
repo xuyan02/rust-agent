@@ -16,7 +16,7 @@ fn agent_context_build_seeds_tools_from_session_and_allows_overrides() -> Result
             .spec()
             .functions
             .iter()
-            .any(|f| f.name == "debug.echo"))
+            .any(|f| f.name == "debug-echo"))
     );
 
     Ok(())

@@ -13,6 +13,7 @@ pub fn build_chat_completions_body(
 
     if !tools.is_empty() {
         body.insert("tools".to_string(), Value::Array(tools.to_vec()));
+        body.insert("tool_choice".to_string(), Value::String("auto".to_string()));
     }
 
     let mut out_msgs = Vec::with_capacity(messages.len());

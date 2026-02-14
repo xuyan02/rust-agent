@@ -26,7 +26,7 @@ async fn shell_tool_rejects_substitution_and_redirection() -> Result<()> {
             .build()
             .unwrap();
 
-        let err = tool.invoke(&ctx, "shell.exec", &args).await.unwrap_err();
+        let err = tool.invoke(&ctx, "shell-exec", &args).await.unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("unsafe shell command"));
     }

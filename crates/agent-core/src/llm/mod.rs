@@ -146,6 +146,10 @@ impl LlmSender for OpenAiSender {
         let tools_json = crate::llm::tools_to_openai_json(tools);
         let body = crate::llm::build_chat_completions_body(&self.model, messages, &tools_json)?;
 
+        if debug_llm {
+            eprintln!("[LLM][request][body] {}", crate::llm::json::dump(&body)?);
+        }
+
         let mut headers = HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,

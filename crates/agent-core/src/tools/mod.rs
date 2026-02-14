@@ -201,7 +201,7 @@ impl Default for FileTool {
 #[tool(id = "file", description = "Workspace file operations")]
 impl FileTool {
     #[tool_fn(
-        name = "file.read",
+        name = "file-read",
         description = "Read a UTF-8 text file under workspace",
         args(offset_lines(default = 0), limit_lines(default = 200))
     )]
@@ -213,6 +213,17 @@ impl FileTool {
         limit_lines: i64,
     ) -> Result<String> {
         let abs = resolve_workspace_relative(ctx.session().workspace_path(), &path)?;
+
+        let meta = tokio::fs::metadata(&abs)
+            .await
+            .with_context(|| format!("failed to stat {}", abs.display()))?;
+        if meta.is_dir() {
+            bail!(
+                "path is a directory (file-read expects a file): {}",
+                abs.display()
+            );
+        }
+
         let s = tokio::fs::read_to_string(&abs)
             .await
             .with_context(|| format!("failed to read {}", abs.display()))?;
@@ -238,7 +249,50 @@ impl FileTool {
     }
 
     #[tool_fn(
-        name = "file.write",
+        name = "file-glob",
+        description = "Find files under workspace by glob pattern. Pattern is relative to workspace. Note: recursive wildcard '**' must be a full path component (use '**/*.rs', not '**.rs'). Examples: '**/*.rs', '.github/workflows/*.yml', 'crates/*/src/**/*.rs'.",
+        args(limit(default = 200))
+    )]
+    pub async fn glob(
+        &self,
+        ctx: &crate::AgentContext<'_>,
+        pattern: String,
+        limit: i64,
+    ) -> Result<String> {
+        let workspace = ctx.session().workspace_path();
+        let pattern = pattern.trim();
+        if pattern.is_empty() {
+            bail!("pattern must not be empty");
+        }
+        if std::path::Path::new(pattern).is_absolute() {
+            bail!("pattern must be relative");
+        }
+
+        let full_pattern = workspace.join(pattern).to_string_lossy().to_string();
+        let limit = usize::try_from(limit.max(0)).unwrap_or(0).min(10_000);
+
+        let mut out = Vec::new();
+        for entry in glob::glob(&full_pattern).with_context(|| "invalid glob pattern")? {
+            let path = entry?;
+            if path.is_dir() {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(workspace)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            out.push(rel);
+            if limit != 0 && out.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(out.join("\n"))
+    }
+
+    #[tool_fn(
+        name = "file-write",
         description = "Write a UTF-8 text file under workspace",
         args(overwrite(default = false))
     )]
@@ -288,7 +342,7 @@ impl Tool for DebugTool {
             id: "debug".to_string(),
             description: "Debug utilities".to_string(),
             functions: vec![FunctionSpec {
-                name: "debug.echo".to_string(),
+                name: "debug-echo".to_string(),
                 description: "Echo input for debugging".to_string(),
                 parameters: ObjectSpec {
                     properties: vec![PropertySpec {
@@ -309,7 +363,7 @@ impl Tool for DebugTool {
         args: &Value,
     ) -> Result<String> {
         match function_name {
-            "debug.echo" => {
+            "debug-echo" => {
                 let text = args
                     .get("text")
                     .and_then(|v| v.as_str())
@@ -338,7 +392,7 @@ impl Default for ShellTool {
 #[tool(id = "shell", description = "Execute shell commands in workspace")]
 impl ShellTool {
     #[tool_fn(
-        name = "shell.exec",
+        name = "shell-exec",
         description = "Execute a shell command (bash -lc) with cwd=workspace"
     )]
     pub async fn exec(&self, ctx: &crate::AgentContext<'_>, command: String) -> Result<String> {

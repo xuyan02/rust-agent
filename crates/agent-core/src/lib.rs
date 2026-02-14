@@ -1,14 +1,13 @@
 mod agent;
 mod agent_context;
-mod agent_runner;
 mod history;
-mod recap_agent;
 mod runtime;
 mod session;
 mod tool_dispatch;
 
 pub mod llm;
 pub mod support;
+mod system_prompt;
 pub mod tools;
 
 // Provide a stable path for proc-macro generated code (it references crate::Tool/ToolSpec/etc.).
@@ -18,13 +17,11 @@ pub use tools::{
 };
 
 pub use agent::{Agent, LlmAgent};
-pub use agent::{ToolLoopOptions, run_tool_loop};
 pub use agent_context::{AgentContext, AgentContextBuilder, AgentContextParent, make_user_message};
-pub use agent_runner::{AgentRunner, RunnerConsole, RunnerConsoleAdapter};
 pub use history::{History, InMemoryHistory};
-pub use recap_agent::ReCapAgent;
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use session::{Session, SessionBuilder};
+pub use system_prompt::{StaticSystemPromptSegment, SystemPromptSegment};
 
 use anyhow::Result;
 

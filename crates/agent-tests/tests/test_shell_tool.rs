@@ -15,7 +15,7 @@ async fn shell_tool_pwd_in_workspace() -> Result<()> {
         .set_workspace_path(workspace.clone())
         .build()?;
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
-    let out = tool.invoke(&ctx, "shell.exec", &args).await?;
+    let out = tool.invoke(&ctx, "shell-exec", &args).await?;
     assert!(out.contains(&*workspace.to_string_lossy()));
 
     let _ = tokio::fs::remove_dir_all(&workspace).await;

@@ -1,6 +1,6 @@
 use crate::llm::ChatMessage;
 use crate::tools::Tool;
-use crate::{History, InMemoryHistory, Session};
+use crate::{History, Session};
 
 pub enum AgentContextParent<'a> {
     Session(&'a Session<'a>),
@@ -9,8 +9,8 @@ pub enum AgentContextParent<'a> {
 
 pub struct AgentContext<'a> {
     parent: AgentContextParent<'a>,
-    history: Box<dyn History>,
-    system_segments: Vec<String>,
+    history: Option<Box<dyn History + 'a>>,
+    system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
 }
 
@@ -27,11 +27,38 @@ impl<'a> AgentContext<'a> {
     }
 
     pub fn history(&self) -> &dyn History {
-        self.history.as_ref()
+        if let Some(h) = self.history.as_deref() {
+            return h;
+        }
+
+        match &self.parent {
+            AgentContextParent::Session(s) => s.history(),
+            AgentContextParent::Context(c) => c.history(),
+        }
     }
 
-    pub fn system_segments(&self) -> &[String] {
-        &self.system_segments
+    pub fn system_prompt_segments(&self) -> Vec<&dyn crate::SystemPromptSegment> {
+        let mut out: Vec<&dyn crate::SystemPromptSegment> = self
+            .system_prompt_segments
+            .iter()
+            .map(|s| s.as_ref())
+            .collect();
+
+        let mut cur = &self.parent;
+        loop {
+            match cur {
+                AgentContextParent::Session(s) => {
+                    out.extend(s.system_prompt_segments().iter().map(|p| p.as_ref()));
+                    break;
+                }
+                AgentContextParent::Context(c) => {
+                    out.extend(c.system_prompt_segments.iter().map(|p| p.as_ref()));
+                    cur = c.parent();
+                }
+            }
+        }
+
+        out
     }
 
     /// Tools visible from this context (local first, then parent chain).
@@ -59,8 +86,8 @@ impl<'a> AgentContext<'a> {
 
 pub struct AgentContextBuilder<'a> {
     parent: AgentContextParent<'a>,
-    history: Option<Box<dyn History>>,
-    system_segments: Vec<String>,
+    history: Option<Box<dyn History + 'a>>,
+    system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
 }
 
@@ -69,7 +96,7 @@ impl<'a> AgentContextBuilder<'a> {
         Self {
             parent,
             history: None,
-            system_segments: vec![],
+            system_prompt_segments: vec![],
             tools: vec![],
         }
     }
@@ -82,14 +109,19 @@ impl<'a> AgentContextBuilder<'a> {
         Self::new(AgentContextParent::Context(parent))
     }
 
-    pub fn add_system_segment(mut self, seg: String) -> Self {
-        if !seg.is_empty() {
-            self.system_segments.push(seg);
-        }
+    pub fn add_system_prompt_segment(mut self, seg: Box<dyn crate::SystemPromptSegment>) -> Self {
+        self.system_prompt_segments.push(seg);
         self
     }
 
-    pub fn set_history(mut self, history: Box<dyn History>) -> Self {
+    pub fn add_system_segment(self, seg: String) -> Self {
+        if seg.is_empty() {
+            return self;
+        }
+        self.add_system_prompt_segment(Box::new(crate::StaticSystemPromptSegment::new(seg)))
+    }
+
+    pub fn set_history(mut self, history: Box<dyn History + 'a>) -> Self {
         self.history = Some(history);
         self
     }
@@ -100,14 +132,10 @@ impl<'a> AgentContextBuilder<'a> {
     }
 
     pub fn build(self) -> anyhow::Result<AgentContext<'a>> {
-        let history: Box<dyn History> = self
-            .history
-            .unwrap_or_else(|| Box::new(InMemoryHistory::new()));
-
         Ok(AgentContext {
             parent: self.parent,
-            history,
-            system_segments: self.system_segments,
+            history: self.history,
+            system_prompt_segments: self.system_prompt_segments,
             tools: self.tools,
         })
     }

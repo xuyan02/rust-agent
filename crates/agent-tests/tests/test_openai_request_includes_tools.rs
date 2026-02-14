@@ -6,7 +6,7 @@ fn openai_request_includes_tools() -> Result<()> {
     let tools = vec![serde_json::json!({
         "type": "function",
         "function": {
-            "name": "file.read",
+            "name": "file-read",
             "description": "read file",
             "parameters": {
                 "type": "object",
@@ -33,7 +33,7 @@ fn openai_request_includes_tools() -> Result<()> {
     assert_eq!(body["tools"][0]["type"].as_str(), Some("function"));
     assert_eq!(
         body["tools"][0]["function"]["name"].as_str(),
-        Some("file.read")
+        Some("file-read")
     );
 
     Ok(())

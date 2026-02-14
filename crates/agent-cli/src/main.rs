@@ -2,7 +2,6 @@ use anyhow::Result;
 
 mod app;
 mod config;
-mod console;
 
 const USAGE: &str = "agent_cli [--input <text>]\n\nRuns an agent.\n- Loads config from <cwd>/.agent/agent.yaml\n\nModes:\n  (default) interactive console\n  --input <text> single-shot mode (no stdin watch)\n";
 
