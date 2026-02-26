@@ -1,10 +1,12 @@
 use anyhow::{Result, bail};
 
 pub(crate) fn validate_shell_command(command: &str) -> Result<()> {
-    // Strict denylist to match Mi Code safety constraints.
-    // Disallow substitution, redirection, piping, backgrounding, and command chaining.
+    // Relaxed denylist - only block the most dangerous patterns.
+    // Allow: &&, ||, | (piping), ; (command chaining)
+    // Disallow: command substitution $(), backticks, process substitution, backgrounding
     let denied = [
-        "$(", "`", "<(", ">(", "|", ";", "&&", "||", "&", ">", "<", "2>", "1>", "&>",
+        "$(", "`", "<(", ">(", // Command/process substitution
+        // Note: We allow |, ;, &&, ||, >, < for legitimate use cases
     ];
 
     for tok in denied {

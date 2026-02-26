@@ -1,10 +1,10 @@
-use agent_bot::Brain;
+use agent_bot::{Brain, BrainEvent, BrainEventSink};
 use agent_core::{
-    Agent, AgentContext, RuntimeBuilder,
+    Agent, AgentContext, LocalSpawner, RuntimeBuilder,
     llm::{ChatContent, ChatMessage, ChatRole},
 };
 use anyhow::Result;
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::{cell::RefCell, pin::Pin, rc::Rc, sync::mpsc};
 
 struct EchoAgent;
 
@@ -30,57 +30,81 @@ impl Agent for EchoAgent {
     }
 }
 
-fn noop_waker() -> Waker {
-    unsafe fn clone(_: *const ()) -> RawWaker {
-        RawWaker::new(std::ptr::null(), &VTABLE)
+struct TestSpawner {
+    handles: RefCell<Vec<tokio::task::JoinHandle<()>>>,
+}
+
+impl TestSpawner {
+    fn new() -> Self {
+        Self {
+            handles: RefCell::new(Vec::new()),
+        }
     }
-    unsafe fn wake(_: *const ()) {}
-    unsafe fn wake_by_ref(_: *const ()) {}
-    unsafe fn drop(_: *const ()) {}
+}
 
-    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+impl LocalSpawner for TestSpawner {
+    fn spawn_local(&self, fut: Pin<Box<dyn std::future::Future<Output = ()>>>) {
+        let h = tokio::task::spawn_local(fut);
+        self.handles.borrow_mut().push(h);
+    }
+}
 
-    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+struct ChannelSink {
+    tx: mpsc::Sender<BrainEvent>,
+}
+
+impl BrainEventSink for ChannelSink {
+    fn emit(&mut self, event: BrainEvent) {
+        let _ = self.tx.send(event);
+    }
 }
 
 #[test]
 fn brain_outputs_in_order() {
-    let runtime = RuntimeBuilder::new().build();
-    let mut brain = Brain::new(&runtime, Box::new(EchoAgent)).unwrap();
-
-    brain.input("a".to_string());
-    brain.input("b".to_string());
-    brain.input("c".to_string());
-
-    // Drive using a tokio current-thread runtime.
+    // Drive using a tokio current-thread runtime + LocalSet.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
 
-    rt.block_on(async {
-        let waker = noop_waker();
-        let mut cx = Context::from_waker(&waker);
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&rt, async {
+        let spawner: Rc<dyn LocalSpawner> = Rc::new(TestSpawner::new());
+        let runtime = Rc::new(
+            RuntimeBuilder::new()
+                .set_local_spawner(Rc::clone(&spawner))
+                .build(),
+        );
 
-        let mut out = vec![];
+        let session = agent_core::SessionBuilder::new(Rc::clone(&runtime))
+            .set_default_model("gpt-4o".to_string())
+            .build()
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let brain = Brain::new(session, Box::new(EchoAgent), ChannelSink { tx }).unwrap();
+
+        brain.push_input("a");
+        brain.push_input("b");
+        brain.push_input("c");
+
+        let mut out = Vec::new();
         while out.len() < 3 {
-            match brain.poll_output(&mut cx) {
-                Poll::Ready(Ok(s)) => out.push(s),
-                Poll::Ready(Err(e)) => panic!("unexpected error: {e:#}"),
-                Poll::Pending => {
-                    // Yield so agent futures can make progress.
-                    tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                Ok(BrainEvent::OutputText { text }) => out.push(text),
+                Ok(BrainEvent::Error { error }) => panic!("unexpected error: {error:#}"),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("timed out waiting for brain output")
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("channel closed unexpectedly")
                 }
             }
         }
 
-        assert_eq!(
-            out,
-            vec![
-                "echo:a".to_string(),
-                "echo:b".to_string(),
-                "echo:c".to_string()
-            ]
-        );
+        assert_eq!(out, vec!["echo:a", "echo:b", "echo:c"]);
+
+        drop(brain);
     });
 }

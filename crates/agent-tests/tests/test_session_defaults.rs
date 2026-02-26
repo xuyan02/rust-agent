@@ -2,8 +2,8 @@ use anyhow::Result;
 
 #[test]
 fn session_defaults() -> Result<()> {
-    let runtime = agent_core::RuntimeBuilder::new().build();
-    let s = agent_core::SessionBuilder::new(&runtime).build()?;
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
+    let s = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime)).build()?;
     assert!(!s.workspace_path().as_os_str().is_empty());
     assert!(s.agent_path().ends_with(".agent"));
     assert!(s.default_model().is_empty());

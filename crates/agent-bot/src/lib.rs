@@ -1,5 +1,7 @@
+mod bot;
 mod brain;
-mod brain_driver;
+mod team;
 
-pub use brain::Brain;
-pub use brain_driver::{BrainDriver, BrainDriverHandle};
+pub use bot::{Bot, BotEvent, BotEventSink, Envelope};
+pub use brain::{Brain, BrainConfig, BrainEvent, BrainEventSink};
+pub use team::{BotConfig, Team, TeamConfig, TeamEvent, TeamEventSink, ToolConstructor};

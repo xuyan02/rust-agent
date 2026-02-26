@@ -64,10 +64,17 @@ pub fn parse_chat_completions_response(root: &Value) -> Result<ChatMessage> {
         .and_then(|v| v.as_array())
         .context("openai: missing choices")?;
     let choice0 = choices.first().context("openai: empty choices")?;
-    let msg = choice0
-        .get("message")
-        .and_then(|v| v.as_object())
-        .context("openai: missing choices[0].message")?;
+
+    // Support two formats:
+    // 1. Standard OpenAI: choices[0].message.{role,content,tool_calls}
+    // 2. Some compatible APIs: choices[0].{role,content,tool_calls}
+    let msg = if let Some(message_obj) = choice0.get("message").and_then(|v| v.as_object()) {
+        message_obj
+    } else if let Some(obj) = choice0.as_object() {
+        obj
+    } else {
+        bail!("openai: choices[0] is not an object")
+    };
 
     if let Some(tool_calls) = msg.get("tool_calls")
         && tool_calls.is_array()

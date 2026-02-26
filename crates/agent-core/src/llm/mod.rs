@@ -15,9 +15,10 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatRole {
     System,
     User,
@@ -25,7 +26,7 @@ pub enum ChatRole {
     Tool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChatContent {
     Text(String),
     ToolCalls(Value),
@@ -35,7 +36,7 @@ pub enum ChatContent {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: ChatContent,

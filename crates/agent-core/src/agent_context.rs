@@ -1,9 +1,11 @@
+use crate::data_store::DirNode;
 use crate::llm::ChatMessage;
 use crate::tools::Tool;
 use crate::{History, Session};
+use std::rc::Rc;
 
 pub enum AgentContextParent<'a> {
-    Session(&'a Session<'a>),
+    Session(&'a Session),
     Context(&'a AgentContext<'a>),
 }
 
@@ -12,10 +14,12 @@ pub struct AgentContext<'a> {
     history: Option<Box<dyn History + 'a>>,
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
+    disable_tools: bool,
+    dir_node: Option<Rc<DirNode>>,
 }
 
 impl<'a> AgentContext<'a> {
-    pub fn session(&self) -> &Session<'a> {
+    pub fn session(&self) -> &Session {
         match &self.parent {
             AgentContextParent::Session(s) => s,
             AgentContextParent::Context(c) => c.session(),
@@ -34,6 +38,20 @@ impl<'a> AgentContext<'a> {
         match &self.parent {
             AgentContextParent::Session(s) => s.history(),
             AgentContextParent::Context(c) => c.history(),
+        }
+    }
+
+    /// Get the directory node for this context's data storage.
+    /// Falls back to parent's dir_node if not set locally.
+    /// Eventually falls back to Session's dir_node.
+    pub fn dir_node(&self) -> Option<Rc<DirNode>> {
+        if let Some(ref dir) = self.dir_node {
+            return Some(Rc::clone(dir));
+        }
+
+        match &self.parent {
+            AgentContextParent::Session(s) => s.dir_node(),
+            AgentContextParent::Context(c) => c.dir_node(),
         }
     }
 
@@ -63,6 +81,11 @@ impl<'a> AgentContext<'a> {
 
     /// Tools visible from this context (local first, then parent chain).
     pub fn tools(&self) -> Vec<&dyn Tool> {
+        // If tools are disabled, return empty list
+        if self.disable_tools {
+            return vec![];
+        }
+
         let mut out: Vec<&dyn Tool> = self.tools.iter().map(|t| t.as_ref()).collect();
 
         let mut cur = &self.parent;
@@ -89,6 +112,8 @@ pub struct AgentContextBuilder<'a> {
     history: Option<Box<dyn History + 'a>>,
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
+    disable_tools: bool,
+    dir_node: Option<Rc<DirNode>>,
 }
 
 impl<'a> AgentContextBuilder<'a> {
@@ -98,10 +123,12 @@ impl<'a> AgentContextBuilder<'a> {
             history: None,
             system_prompt_segments: vec![],
             tools: vec![],
+            disable_tools: false,
+            dir_node: None,
         }
     }
 
-    pub fn from_session(session: &'a Session<'a>) -> Self {
+    pub fn from_session(session: &'a Session) -> Self {
         Self::new(AgentContextParent::Session(session))
     }
 
@@ -131,12 +158,24 @@ impl<'a> AgentContextBuilder<'a> {
         self
     }
 
+    pub fn disable_tools(mut self) -> Self {
+        self.disable_tools = true;
+        self
+    }
+
+    pub fn set_dir_node(mut self, dir_node: Rc<DirNode>) -> Self {
+        self.dir_node = Some(dir_node);
+        self
+    }
+
     pub fn build(self) -> anyhow::Result<AgentContext<'a>> {
         Ok(AgentContext {
             parent: self.parent,
             history: self.history,
             system_prompt_segments: self.system_prompt_segments,
             tools: self.tools,
+            disable_tools: self.disable_tools,
+            dir_node: self.dir_node,
         })
     }
 }

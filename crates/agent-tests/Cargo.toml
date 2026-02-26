@@ -7,8 +7,11 @@ publish = false
 
 [dev-dependencies]
 agent-core = { path = "../agent-core" }
+agent-bot = { path = "../agent-bot" }
 anyhow.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tokio.workspace = true
 async-trait = "0.1"
 tempfile = "3"

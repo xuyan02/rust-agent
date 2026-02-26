@@ -242,7 +242,7 @@ fn tool_arg_attrs_for_param(
 }
 
 fn is_agent_context_param(ty: &Type) -> bool {
-    // Accept &AgentContext or &crate::AgentContext (including &AgentContext<'_>)
+    // Accept &AgentContext or &crate::AgentContext
     let Type::Reference(r) = ty else { return false };
     let Type::Path(tp) = &*r.elem else {
         return false;

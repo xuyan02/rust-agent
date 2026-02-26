@@ -10,8 +10,8 @@ async fn shell_tool_pwd_in_workspace() -> Result<()> {
     let tool = ShellTool::new();
 
     let args = serde_json::json!({"command": "pwd"});
-    let runtime = agent_core::RuntimeBuilder::new().build();
-    let session = agent_core::SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
+    let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(workspace.clone())
         .build()?;
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;

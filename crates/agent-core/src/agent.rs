@@ -4,8 +4,13 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
+/// Maximum number of tool-call iterations before aborting.
+/// This prevents infinite loops (and runaway API costs) when the LLM
+/// repeatedly returns tool calls without ever producing a text response.
+pub const MAX_TOOL_ITERATIONS: usize = 50;
+
 #[async_trait(?Send)]
-pub trait Agent: Send {
+pub trait Agent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()>;
 }
 
@@ -79,7 +84,7 @@ impl Default for LlmAgent {
 impl Agent for LlmAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
         let mut messages: Vec<ChatMessage> = vec![];
-        messages.extend(ctx.history().get_all().await?);
+        messages.extend(ctx.history().get_all(ctx).await?);
 
         ctx.session().runtime().execute(ctx, messages).await
     }

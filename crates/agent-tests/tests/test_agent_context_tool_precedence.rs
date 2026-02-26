@@ -25,9 +25,9 @@ impl ToolB {
 
 #[tokio::test]
 async fn child_ctx_tools_precede_parent_ctx_and_session() -> Result<()> {
-    let runtime = agent_core::RuntimeBuilder::new().build();
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
 
-    let session = agent_core::SessionBuilder::new(&runtime)
+    let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_default_model("fake".to_string())
         .add_tool(Box::new(ToolA))
         .build()?;

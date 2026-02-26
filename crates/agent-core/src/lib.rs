@@ -1,6 +1,8 @@
 mod agent;
 mod agent_context;
+pub mod data_store;
 mod history;
+mod react_agent;
 mod runtime;
 mod session;
 mod tool_dispatch;
@@ -18,8 +20,13 @@ pub use tools::{
 
 pub use agent::{Agent, LlmAgent};
 pub use agent_context::{AgentContext, AgentContextBuilder, AgentContextParent, make_user_message};
-pub use history::{History, InMemoryHistory};
-pub use runtime::{Runtime, RuntimeBuilder};
+pub use data_store::{DataNode, DataStore, DirNode, TypeInfo};
+pub use history::{
+    History, InMemoryHistory, PersistentHistory,
+    estimate_tokens, estimate_message_tokens, estimate_messages_tokens,
+};
+pub use react_agent::ReActAgent;
+pub use runtime::{LocalSpawner, Runtime, RuntimeBuilder};
 pub use session::{Session, SessionBuilder};
 pub use system_prompt::{StaticSystemPromptSegment, SystemPromptSegment};
 

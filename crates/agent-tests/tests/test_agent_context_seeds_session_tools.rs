@@ -3,9 +3,9 @@ use anyhow::Result;
 
 #[test]
 fn agent_context_build_seeds_tools_from_session_and_allows_overrides() -> Result<()> {
-    let runtime = agent_core::RuntimeBuilder::new().build();
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
 
-    let session = SessionBuilder::new(&runtime)
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_default_model("gpt-test".to_string())
         .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;

@@ -6,6 +6,8 @@ members = [
   "crates/agent-core",
   "crates/agent-tests",
   "crates/agent-macros",
+  "crates/brain-cli",
+  "crates/team-cli",
 ]
 
 [workspace.package]

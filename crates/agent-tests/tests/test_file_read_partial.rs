@@ -12,8 +12,8 @@ async fn file_read_supports_offset_and_limit_lines() -> Result<()> {
     let file = ws.join("a.txt");
     tokio::fs::write(&file, "l0\nl1\nl2\nl3\nl4\n").await?;
 
-    let runtime = RuntimeBuilder::new().build();
-    let session = SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(RuntimeBuilder::new().build());
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(ws.clone())
         .set_agent_path(agent_dir)
         .set_default_model("dummy".to_string())

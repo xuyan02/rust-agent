@@ -1,20 +1,27 @@
+use crate::data_store::DirNode;
 use crate::Result;
 use anyhow::{Context, Result as AnyhowResult};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-pub struct Session<'a> {
-    runtime: &'a crate::Runtime,
+pub struct Session {
+    runtime: Rc<crate::Runtime>,
     workspace_path: PathBuf,
     agent_path: PathBuf,
     default_model: String,
     tools: Vec<Box<dyn crate::tools::Tool>>,
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
-    history: Box<dyn crate::History + 'a>,
+    history: Box<dyn crate::History>,
+    dir_node: Option<Rc<DirNode>>,
 }
 
-impl Session<'_> {
+impl Session {
     pub fn runtime(&self) -> &crate::Runtime {
-        self.runtime
+        self.runtime.as_ref()
+    }
+
+    pub fn runtime_rc(&self) -> Rc<crate::Runtime> {
+        Rc::clone(&self.runtime)
     }
 
     pub fn workspace_path(&self) -> &Path {
@@ -37,23 +44,28 @@ impl Session<'_> {
         &self.system_prompt_segments
     }
 
-    pub fn history(&self) -> &(dyn crate::History + '_) {
+    pub fn history(&self) -> &dyn crate::History {
         self.history.as_ref()
+    }
+
+    pub fn dir_node(&self) -> Option<Rc<DirNode>> {
+        self.dir_node.as_ref().map(Rc::clone)
     }
 }
 
-pub struct SessionBuilder<'a> {
-    runtime: &'a crate::Runtime,
+pub struct SessionBuilder {
+    runtime: Rc<crate::Runtime>,
     workspace_path: Option<PathBuf>,
     agent_path: Option<PathBuf>,
     default_model: Option<String>,
     tools: Vec<Box<dyn crate::tools::Tool>>,
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
-    history: Option<Box<dyn crate::History + 'a>>,
+    history: Option<Box<dyn crate::History>>,
+    dir_node: Option<Rc<DirNode>>,
 }
 
-impl<'a> SessionBuilder<'a> {
-    pub fn new(runtime: &'a crate::Runtime) -> Self {
+impl SessionBuilder {
+    pub fn new(runtime: Rc<crate::Runtime>) -> Self {
         Self {
             runtime,
             workspace_path: None,
@@ -62,11 +74,12 @@ impl<'a> SessionBuilder<'a> {
             tools: vec![],
             system_prompt_segments: vec![],
             history: None,
+            dir_node: None,
         }
     }
 }
 
-impl<'a> SessionBuilder<'a> {
+impl SessionBuilder {
     pub fn set_workspace_path(mut self, p: PathBuf) -> Self {
         self.workspace_path = Some(p);
         self
@@ -92,12 +105,17 @@ impl<'a> SessionBuilder<'a> {
         self
     }
 
-    pub fn set_history(mut self, history: Box<dyn crate::History + 'a>) -> Self {
+    pub fn set_history(mut self, history: Box<dyn crate::History>) -> Self {
         self.history = Some(history);
         self
     }
 
-    pub fn build(self) -> Result<Session<'a>> {
+    pub fn set_dir_node(mut self, dir_node: Rc<DirNode>) -> Self {
+        self.dir_node = Some(dir_node);
+        self
+    }
+
+    pub fn build(self) -> Result<Session> {
         let workspace_path = self
             .workspace_path
             .unwrap_or(std::env::current_dir().context("failed to get cwd")?);
@@ -118,6 +136,7 @@ impl<'a> SessionBuilder<'a> {
             tools: self.tools,
             system_prompt_segments: self.system_prompt_segments,
             history,
+            dir_node: self.dir_node,
         })
     }
 }

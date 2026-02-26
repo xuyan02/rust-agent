@@ -17,8 +17,8 @@ async fn shell_tool_rejects_substitution_and_redirection() -> Result<()> {
         "echo hi &",
     ] {
         let args = serde_json::json!({"command": cmd});
-        let runtime = agent_core::RuntimeBuilder::new().build();
-        let session = agent_core::SessionBuilder::new(&runtime)
+        let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
+        let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
             .set_workspace_path(ws.to_path_buf())
             .build()
             .unwrap();

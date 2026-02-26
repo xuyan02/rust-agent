@@ -18,8 +18,8 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
     assert_eq!(params_json["additionalProperties"].as_bool(), Some(false));
     assert!(params_json["properties"].get("text").is_some());
 
-    let runtime = agent_core::RuntimeBuilder::new().build();
-    let session = agent_core::SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
+    let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(std::path::PathBuf::from("/tmp"))
         .build()?;
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;
@@ -39,8 +39,8 @@ async fn tool_macro_generates_spec_and_invoke() -> Result<()> {
 async fn tool_macro_errors_are_stable() -> Result<()> {
     let t = agent_core::tools::MacroExampleTool;
 
-    let runtime = agent_core::RuntimeBuilder::new().build();
-    let session = agent_core::SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(agent_core::RuntimeBuilder::new().build());
+    let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(std::path::PathBuf::from("/tmp"))
         .build()?;
     let ctx = agent_core::AgentContextBuilder::from_session(&session).build()?;

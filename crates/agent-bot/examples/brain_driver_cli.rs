@@ -1,7 +1,8 @@
-use agent_bot::{Brain, BrainDriver};
-use agent_core::{LlmAgent, RuntimeBuilder};
+use agent_bot::{Brain, BrainEvent, BrainEventSink};
+use agent_core::{LlmAgent, LocalSpawner, RuntimeBuilder};
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::{pin::Pin, rc::Rc, sync::mpsc};
 use tokio::io::AsyncBufReadExt;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +33,24 @@ async fn load_cfg(path: impl AsRef<std::path::Path>) -> Result<AgentCfg> {
     Ok(cfg)
 }
 
+struct TokioSpawner;
+
+impl LocalSpawner for TokioSpawner {
+    fn spawn_local(&self, fut: Pin<Box<dyn std::future::Future<Output = ()>>>) {
+        tokio::task::spawn_local(fut);
+    }
+}
+
+struct ChannelSink {
+    tx: mpsc::Sender<BrainEvent>,
+}
+
+impl BrainEventSink for ChannelSink {
+    fn emit(&mut self, event: BrainEvent) {
+        let _ = self.tx.send(event);
+    }
+}
+
 fn main() -> Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -44,48 +63,65 @@ fn main() -> Result<()> {
         .openai
         .ok_or_else(|| anyhow::anyhow!("missing openai config in .agent/agent.yaml"))?;
 
-    let runtime = RuntimeBuilder::new()
-        .add_llm_provider(Box::new(agent_core::llm::OpenAiProvider::new(
-            agent_core::llm::OpenAiProviderConfig {
-                base_url: openai.base_url,
-                api_key: openai.api_key,
-                model_provider_id: openai.model_provider_id,
-            },
-        )))
-        .build();
-
-    let brain = Brain::new(&runtime, Box::new(LlmAgent::new()))?;
-    let (driver, handle) = BrainDriver::new(brain);
-
     let local = tokio::task::LocalSet::new();
     local.block_on(&rt, async move {
-        eprintln!("brain_driver_cli ready. type and press enter; 'exit' to quit.");
+        let runtime = Rc::new(
+            RuntimeBuilder::new()
+                .set_local_spawner(Rc::new(TokioSpawner))
+                .add_llm_provider(Box::new(agent_core::llm::OpenAiProvider::new(
+                    agent_core::llm::OpenAiProviderConfig {
+                        base_url: openai.base_url,
+                        api_key: openai.api_key,
+                        model_provider_id: openai.model_provider_id,
+                    },
+                )))
+                .build(),
+        );
+
+        let session = agent_core::SessionBuilder::new(Rc::clone(&runtime))
+            .set_default_model("gpt-4o".to_string())
+            .add_tool(Box::new(agent_core::tools::DebugTool::new()))
+            .build()?;
+
+        let (tx, rx) = mpsc::channel();
+        let brain = Brain::new(session, Box::new(LlmAgent::new()), ChannelSink { tx })?;
+
+        eprintln!("brain_cli ready. type and press enter; 'exit' to quit.");
 
         let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
 
         loop {
             tokio::select! {
-                r = driver.run() => {
-                    if let Err(e) = r {
-                        eprintln!("driver error: {e:#}");
-                    }
-                    break;
-                }
                 line = stdin.next_line() => {
                     let Ok(Some(line)) = line else { break };
                     let trimmed = line.trim().to_string();
                     if trimmed == "exit" {
-                        handle.shutdown();
+                        brain.shutdown();
                         break;
                     }
                     if trimmed.is_empty() {
                         continue;
                     }
-                    handle.input(trimmed);
+                    brain.push_input(trimmed);
+                }
+                _ = tokio::task::yield_now() => {
+                    match rx.try_recv() {
+                        Ok(BrainEvent::OutputText { text }) => {
+                            println!("{text}");
+                        }
+                        Ok(BrainEvent::Error { error }) => {
+                            eprintln!("brain error: {error:#}");
+                            break;
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => break,
+                    }
                 }
             }
         }
-    });
+
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     Ok(())
 }

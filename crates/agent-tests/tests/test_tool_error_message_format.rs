@@ -9,8 +9,8 @@ async fn file_read_missing_has_root_message() -> Result<()> {
     let agent_dir = ws.join(".agent");
     tokio::fs::create_dir_all(&agent_dir).await?;
 
-    let runtime = RuntimeBuilder::new().build();
-    let session = SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(RuntimeBuilder::new().build());
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(ws.clone())
         .set_agent_path(agent_dir)
         .set_default_model("dummy".to_string())

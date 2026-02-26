@@ -12,8 +12,8 @@ async fn file_glob_finds_files_under_workspace() -> Result<()> {
     tokio::fs::create_dir_all(ws.join("a/b")).await?;
     tokio::fs::write(ws.join("a/b/c.txt"), "x").await?;
 
-    let runtime = RuntimeBuilder::new().build();
-    let session = SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(RuntimeBuilder::new().build());
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(ws.clone())
         .set_agent_path(agent_dir)
         .set_default_model("dummy".to_string())
@@ -37,8 +37,8 @@ async fn file_glob_rejects_absolute_patterns() -> Result<()> {
     let agent_dir = ws.join(".agent");
     tokio::fs::create_dir_all(&agent_dir).await?;
 
-    let runtime = RuntimeBuilder::new().build();
-    let session = SessionBuilder::new(&runtime)
+    let runtime = std::rc::Rc::new(RuntimeBuilder::new().build());
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(ws.clone())
         .set_agent_path(agent_dir)
         .set_default_model("dummy".to_string())

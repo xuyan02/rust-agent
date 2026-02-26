@@ -31,9 +31,9 @@ pub async fn run(args: Args) -> Result<()> {
             model_provider_id: o.model_provider_id.clone(),
         });
     }
-    let runtime = runtime_builder.build();
+    let runtime = std::rc::Rc::new(runtime_builder.build());
 
-    let session = agent_core::SessionBuilder::new(&runtime)
+    let session = agent_core::SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_workspace_path(workspace.clone())
         .set_agent_path(agent_dir.clone())
         .set_default_model(cfg.model)
@@ -51,7 +51,7 @@ pub async fn run(args: Args) -> Result<()> {
 
     if let Some(input) = args.input {
         ctx.history()
-            .append(agent_core::make_user_message(input))
+            .append(&ctx, agent_core::make_user_message(input))
             .await?;
         agent_core::LlmAgent::new().run(&ctx).await?;
         return Ok(());
@@ -69,7 +69,7 @@ pub async fn run(args: Args) -> Result<()> {
         }
 
         ctx.history()
-            .append(agent_core::make_user_message(trimmed.to_string()))
+            .append(&ctx, agent_core::make_user_message(trimmed.to_string()))
             .await?;
         agent_core::LlmAgent::new().run(&ctx).await?;
     }

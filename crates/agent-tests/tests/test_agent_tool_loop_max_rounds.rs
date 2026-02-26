@@ -46,11 +46,13 @@ impl LlmSender for AlwaysToolCallsSender {
 #[tokio::test]
 #[ignore]
 async fn agent_tool_loop_aborts_after_max_rounds() -> Result<()> {
-    let runtime = agent_core::RuntimeBuilder::new()
-        .add_llm_provider(Box::new(TestProvider))
-        .build();
+    let runtime = std::rc::Rc::new(
+        agent_core::RuntimeBuilder::new()
+            .add_llm_provider(Box::new(TestProvider))
+            .build(),
+    );
 
-    let session = SessionBuilder::new(&runtime)
+    let session = SessionBuilder::new(std::rc::Rc::clone(&runtime))
         .set_default_model("gpt-test".to_string())
         .add_tool(Box::new(agent_core::tools::DebugTool::new()))
         .build()?;
@@ -58,7 +60,7 @@ async fn agent_tool_loop_aborts_after_max_rounds() -> Result<()> {
     let ctx = AgentContextBuilder::from_session(&session).build()?;
     let _ = ctx
         .history()
-        .append(agent_core::make_user_message("hi".to_string()))
+        .append(&ctx, agent_core::make_user_message("hi".to_string()))
         .await;
 
     let agent = agent_core::LlmAgent::new();

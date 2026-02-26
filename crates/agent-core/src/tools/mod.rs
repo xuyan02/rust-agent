@@ -1,6 +1,8 @@
+mod deep_think;
 mod macro_example;
 mod shell;
 
+pub use deep_think::DeepThinkTool;
 pub use macro_example::MacroExampleTool;
 
 use anyhow::{Context, Result, bail};
