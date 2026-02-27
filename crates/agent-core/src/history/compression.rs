@@ -265,10 +265,13 @@ mod tests {
     #[test]
     fn test_compression_config() {
         let config = CompressionConfig::default();
-        assert_eq!(config.compress_threshold_tokens, 20000);
+        assert_eq!(config.compress_threshold_tokens, 16000);
         assert!(config.enabled);
 
-        let config = CompressionConfig::disabled();
+        let config = CompressionConfig {
+            enabled: false,
+            ..Default::default()
+        };
         assert!(!config.enabled);
     }
 

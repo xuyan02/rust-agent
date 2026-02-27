@@ -167,40 +167,78 @@ impl LlmSender for OpenAiSender {
             headers.insert("X-Model-Provider-Id", HeaderValue::from_str(v)?);
         }
 
-        let resp = self
-            .http
-            .post(url)
-            .headers(headers)
-            .body(Bytes::from(crate::llm::json::dump(&body)?))
-            .send()
-            .await
-            .with_context(|| "openai: http request failed")?;
+        // Retry with exponential backoff for rate limit errors
+        let max_retries = 5;
+        let mut retry_count = 0;
 
-        let status = resp.status().as_u16();
-        let body = resp
-            .bytes()
-            .await
-            .with_context(|| "openai: failed to read response body")?;
+        loop {
+            let resp = self
+                .http
+                .post(&url)
+                .headers(headers.clone())
+                .body(Bytes::from(crate::llm::json::dump(&body)?))
+                .send()
+                .await
+                .with_context(|| "openai: http request failed")?;
 
-        if !(200..300).contains(&status) {
-            let text = std::str::from_utf8(&body)
+            let status = resp.status().as_u16();
+            let response_body = resp
+                .bytes()
+                .await
+                .with_context(|| "openai: failed to read response body")?;
+
+            // Success case
+            if (200..300).contains(&status) {
+                let v = crate::llm::json::parse(
+                    std::str::from_utf8(&response_body).context("openai: response is not utf-8")?,
+                )
+                .context("openai: failed to parse response JSON")?;
+                let reply = crate::llm::parse_chat_completions_response(&v)?;
+
+                if debug_llm {
+                    eprintln!("[LLM][response] provider=openai model={}", self.model);
+                    eprintln!("[LLM][response] {:?}: {:?}", reply.role, reply.content);
+                }
+
+                return Ok(reply);
+            }
+
+            // Error case - check if retryable
+            let text = std::str::from_utf8(&response_body)
                 .unwrap_or("<non-utf8 response body>")
                 .to_string();
-            bail!("openai: http status={} body={}", status, text);
+
+            let is_rate_limit = status == 429 ||
+                text.contains("rate limit") ||
+                text.contains("circuit breaker");
+
+            if is_rate_limit && retry_count < max_retries {
+                // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                let delay_secs = 1u64 << retry_count;
+                eprintln!(
+                    "[LLM][retry] Rate limit hit (attempt {}/{}), waiting {}s before retry...",
+                    retry_count + 1,
+                    max_retries,
+                    delay_secs
+                );
+
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                retry_count += 1;
+                continue;
+            }
+
+            // Non-retryable error or max retries exceeded
+            if is_rate_limit {
+                bail!(
+                    "openai: rate limit exceeded after {} retries. http status={} body={}",
+                    max_retries,
+                    status,
+                    text
+                );
+            } else {
+                bail!("openai: http status={} body={}", status, text);
+            }
         }
-
-        let v = crate::llm::json::parse(
-            std::str::from_utf8(&body).context("openai: response is not utf-8")?,
-        )
-        .context("openai: failed to parse response JSON")?;
-        let reply = crate::llm::parse_chat_completions_response(&v)?;
-
-        if debug_llm {
-            eprintln!("[LLM][response] provider=openai model={}", self.model);
-            eprintln!("[LLM][response] {:?}: {:?}", reply.role, reply.content);
-        }
-
-        Ok(reply)
     }
 }
 

@@ -45,6 +45,7 @@ impl Default for ReActAgent {
 }
 
 /// Decision from Think phase based on prefix markers
+#[derive(Debug)]
 enum ThinkDecision {
     /// [think] - Continue thinking
     ContinueThinking { thought: String },
@@ -76,6 +77,12 @@ impl Agent for ReActAgent {
                         .append(ctx, ChatMessage::assistant_text(thought))
                         .await?;
 
+                    // Add a user message to continue the conversation
+                    // (required because some models don't support ending with assistant message)
+                    ctx.history()
+                        .append(ctx, ChatMessage::user_text("Continue thinking."))
+                        .await?;
+
                     // Continue to next Think phase
                     continue;
                 }
@@ -85,6 +92,12 @@ impl Agent for ReActAgent {
                     // Append to history
                     ctx.history()
                         .append(ctx, ChatMessage::assistant_text(thought))
+                        .await?;
+
+                    // Add a user message before Act phase
+                    // (required because some models don't support ending with assistant message)
+                    ctx.history()
+                        .append(ctx, ChatMessage::user_text("Proceed with the action."))
                         .await?;
 
                     // Proceed to Act phase
@@ -153,7 +166,7 @@ Review:
 3. What information you currently have
 4. What information is still missing
 
-You MUST start your response with ONE of these prefixes:
+CRITICAL: You MUST start your response with EXACTLY ONE prefix:
 
 [think] - If you need more time to analyze before taking action
 [act] - If you're ready to take an action (use a tool)
@@ -167,8 +180,11 @@ Examples:
 
 [answer] Based on the observations, the answer is: ...
 
-Important:
-- The prefix MUST be at the very start of your response
+STRICT RULES:
+- Use ONLY ONE prefix per response
+- The prefix MUST be at the very start (first line)
+- NEVER use multiple prefixes in the same response
+- NEVER output [think] followed by [act] or [answer]
 - Choose [think] if you're uncertain or need to reason more
 - Choose [act] when you have a clear action to take
 - Choose [answer] when you're ready to provide the final answer to the user"#
@@ -178,6 +194,31 @@ Important:
     fn parse_think_decision(&self, output: &str) -> Result<ThinkDecision> {
         let trimmed = output.trim();
 
+        // Count how many decision markers appear in the output
+        let think_count = trimmed.matches("[think]").count();
+        let act_count = trimmed.matches("[act]").count();
+        let answer_count = trimmed.matches("[answer]").count();
+        let total_markers = think_count + act_count + answer_count;
+
+        // Validate: exactly one marker allowed
+        if total_markers == 0 {
+            bail!(
+                "Think phase output must start with [think], [act], or [answer]. Got: {}",
+                trimmed.chars().take(50).collect::<String>()
+            );
+        }
+
+        if total_markers > 1 {
+            bail!(
+                "Think phase output must contain ONLY ONE decision marker. Found: [think]={}, [act]={}, [answer]={}. Output: {}",
+                think_count,
+                act_count,
+                answer_count,
+                trimmed.chars().take(100).collect::<String>()
+            );
+        }
+
+        // Parse the single marker
         if let Some(content) = trimmed.strip_prefix("[think]") {
             return Ok(ThinkDecision::ContinueThinking {
                 thought: format!("[think]{}", content),
@@ -197,7 +238,7 @@ Important:
         }
 
         bail!(
-            "Think phase output must start with [think], [act], or [answer]. Got: {}",
+            "Think phase output must START with [think], [act], or [answer]. Got: {}",
             trimmed.chars().take(50).collect::<String>()
         );
     }
@@ -261,5 +302,69 @@ The observation will help you analyze the results in the next thinking phase."#
             ChatContent::Text(text) => Ok(text.clone()),
             _ => bail!("Expected text content"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_think_decision_single_marker() {
+        let agent = ReActAgent::new();
+
+        // Valid: single [think]
+        let result = agent.parse_think_decision("[think] Let me analyze this problem...");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), ThinkDecision::ContinueThinking { .. }));
+
+        // Valid: single [act]
+        let result = agent.parse_think_decision("[act] I will use file-glob tool.");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), ThinkDecision::ReadyToAct { .. }));
+
+        // Valid: single [answer]
+        let result = agent.parse_think_decision("[answer] The answer is 42.");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), ThinkDecision::FinalAnswer { .. }));
+    }
+
+    #[test]
+    fn test_parse_think_decision_multiple_markers_error() {
+        let agent = ReActAgent::new();
+
+        // Invalid: multiple markers
+        let result = agent.parse_think_decision("[think] Let me think... [act] Now I will act.");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("ONLY ONE decision marker"));
+
+        // Invalid: multiple same markers
+        let result = agent.parse_think_decision("[think] First thought [think] Second thought");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("ONLY ONE decision marker"));
+    }
+
+    #[test]
+    fn test_parse_think_decision_no_marker_error() {
+        let agent = ReActAgent::new();
+
+        // Invalid: no marker
+        let result = agent.parse_think_decision("I forgot to add a marker.");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("must start with"));
+    }
+
+    #[test]
+    fn test_parse_think_decision_marker_not_at_start() {
+        let agent = ReActAgent::new();
+
+        // Invalid: marker not at start
+        let result = agent.parse_think_decision("Let me think... [think] Now analyzing.");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("must START with"));
     }
 }

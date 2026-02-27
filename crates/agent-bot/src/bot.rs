@@ -1,4 +1,4 @@
-use crate::{Brain, BrainEvent, BrainEventSink};
+use crate::{Brain, BrainEvent, BrainEventSink, GoalState, GoalTool};
 use agent_core::{Agent, LlmAgent, ReActAgent, Session, SessionBuilder};
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,39 @@ struct BrainToBotSink {
     inner: Rc<RefCell<Inner>>,
 }
 
+struct WorkBrainSink {
+    bot_name: String,
+    conversation_brain: Rc<RefCell<Option<Brain>>>,
+}
+
+impl BrainEventSink for WorkBrainSink {
+    fn emit(&mut self, event: BrainEvent) {
+        match event {
+            BrainEvent::OutputText { text } => {
+                eprintln!("[Bot::{}::WorkBrain] Result: {}", self.bot_name,
+                    if text.len() > 200 { format!("{}...", &text[..200]) } else { text.clone() });
+
+                // Send result back to conversation brain as observation
+                if let Some(conv_brain) = self.conversation_brain.borrow().as_ref() {
+                    conv_brain.push_input(format!("Work brain result:\n{}", text));
+                } else {
+                    eprintln!("[Bot::{}::WorkBrain] Conversation brain not available", self.bot_name);
+                }
+            }
+            BrainEvent::Error { error } => {
+                eprintln!("[Bot::{}::WorkBrain] Error: {}", self.bot_name, error);
+
+                // Send error back to conversation brain
+                if let Some(conv_brain) = self.conversation_brain.borrow().as_ref() {
+                    conv_brain.push_input(format!("Work brain error: {}", error));
+                } else {
+                    eprintln!("[Bot::{}::WorkBrain] Conversation brain not available to report error", self.bot_name);
+                }
+            }
+        }
+    }
+}
+
 impl BrainEventSink for BrainToBotSink {
     fn emit(&mut self, event: BrainEvent) {
         match event {
@@ -32,15 +65,31 @@ impl BrainEventSink for BrainToBotSink {
                 let parsed = parse_brain_output(&text, &self.bot_name);
                 match parsed {
                     Ok((to, content)) => {
-                        let message = Envelope {
-                            from: self.bot_name.clone(),
-                            to,
-                            content,
-                        };
-                        self.inner
-                            .borrow_mut()
-                            .sink
-                            .emit(BotEvent::OutputMessage { message });
+                        // Check if this is a message to work-brain
+                        if to == "work-brain" {
+                            // Route to work brain
+                            let mut inner = self.inner.borrow_mut();
+                            if let Some(work_brain) = &inner.work_brain {
+                                eprintln!("[Bot::{}] Routing message to work-brain", self.bot_name);
+                                work_brain.push_input(content);
+                            } else {
+                                eprintln!("[Bot::{}] Work brain not available", self.bot_name);
+                                inner.sink.emit(BotEvent::Error {
+                                    error: anyhow::anyhow!("work-brain is not available"),
+                                });
+                            }
+                        } else {
+                            // Regular message - output to external
+                            let message = Envelope {
+                                from: self.bot_name.clone(),
+                                to,
+                                content,
+                            };
+                            self.inner
+                                .borrow_mut()
+                                .sink
+                                .emit(BotEvent::OutputMessage { message });
+                        }
                     }
                     Err(error) => {
                         // Log the error with output details for debugging
@@ -59,12 +108,15 @@ impl BrainEventSink for BrainToBotSink {
 
 struct Inner {
     sink: Box<dyn BotEventSink>,
+    work_brain: Option<Brain>,
+    goal_state: GoalState,
 }
 
 pub struct Bot {
     name: String,
-    brain: Brain,
-    deep_brain_session: Rc<Session>,
+    conversation_brain: Brain,
+    work_brain: Brain,
+    goal_state: GoalState,
 
     // Keep alive for BrainToBotSink.
     _inner: Rc<RefCell<Inner>>,
@@ -73,128 +125,18 @@ pub struct Bot {
     _inbox: Rc<RefCell<VecDeque<Envelope>>>,
 }
 
-/// BotDeepThinkTool - DeepThink tool that uses Bot's Deep Brain Session
-struct BotDeepThinkTool {
-    deep_brain_session: Rc<Session>,
-}
-
-impl BotDeepThinkTool {
-    fn new(deep_brain_session: Rc<Session>) -> Self {
-        Self { deep_brain_session }
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl agent_core::tools::Tool for BotDeepThinkTool {
-    fn spec(&self) -> &agent_core::tools::ToolSpec {
-        use agent_core::tools::*;
-        static SPEC: std::sync::OnceLock<ToolSpec> = std::sync::OnceLock::new();
-        SPEC.get_or_init(|| ToolSpec {
-            id: "deep-think".to_string(),
-            description: "Deep reasoning agent for multi-step tasks".to_string(),
-            functions: vec![FunctionSpec {
-                name: "deep-think".to_string(),
-                description: "Delegate any task requiring multiple steps, analysis, or planning to the deep reasoning agent. \
-                             It can use tools, think through problems, and provide comprehensive answers. \
-                             Use for: analysis, review, debugging, calculation, research, multi-file operations."
-                    .to_string(),
-                parameters: ObjectSpec {
-                    properties: vec![PropertySpec {
-                        name: "task".to_string(),
-                        ty: TypeSpec::String(StringSpec::default()),
-                    }],
-                    required: vec!["task".to_string()],
-                    additional_properties: false,
-                },
-            }],
-        })
-    }
-
-    async fn invoke(
-        &self,
-        _ctx: &agent_core::AgentContext<'_>,
-        function_name: &str,
-        args: &serde_json::Value,
-    ) -> Result<String> {
-        match function_name {
-            "deep-think" => {
-                let task = args
-                    .get("task")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing 'task' argument"))?;
-
-                // Create context from Deep Brain's Session (not Main Brain's context)
-                // Deep Brain has clean Session without Bot protocol prompts
-                let deep_history: Box<dyn agent_core::History> = Box::new(agent_core::InMemoryHistory::new());
-                let deep_ctx = agent_core::AgentContextBuilder::from_session(self.deep_brain_session.as_ref())
-                    .set_history(deep_history)
-                    .build()?;
-
-                // Append task after context is created
-                deep_ctx.history()
-                    .append(&deep_ctx, agent_core::llm::ChatMessage::user_text(task))
-                    .await?;
-
-                // Create and run ReActAgent
-                eprintln!("[Bot::DeepBrain] Starting deep reasoning for task");
-                let react_agent = ReActAgent::new().with_logging(true);
-                if let Err(e) = react_agent.run(&deep_ctx).await {
-                    eprintln!("[Bot::DeepBrain] Failed: {}", e);
-                    return Err(anyhow::anyhow!(
-                        "Deep thinking failed: {}. This might be due to API rate limits or quota restrictions. Try again in a moment.",
-                        e
-                    ));
-                }
-
-                eprintln!("[Bot::DeepBrain] Completed successfully");
-
-                // Extract the final answer from the isolated history
-                let messages = deep_ctx.history().get_all(&deep_ctx).await?;
-                let last_assistant = messages
-                    .iter()
-                    .rev()
-                    .find(|m| matches!(m.role, agent_core::llm::ChatRole::Assistant))
-                    .ok_or_else(|| anyhow::anyhow!("no answer from deep brain"))?;
-
-                match &last_assistant.content {
-                    agent_core::llm::ChatContent::Text(text) => {
-                        // Extract content after [answer] prefix if present
-                        let answer = if let Some(content) = text.strip_prefix("[answer]") {
-                            content.trim().to_string()
-                        } else {
-                            text.clone()
-                        };
-
-                        eprintln!("[Bot::DeepBrain] Final answer (length: {} chars):\n{}",
-                            answer.len(),
-                            if answer.len() > 500 {
-                                format!("{}...", &answer[..500])
-                            } else {
-                                answer.clone()
-                            });
-
-                        Ok(answer)
-                    }
-                    _ => anyhow::bail!("unexpected content type from deep brain"),
-                }
-            }
-            _ => anyhow::bail!("unknown function: {}", function_name),
-        }
-    }
-}
-
 impl Bot {
-    /// Creates a new Bot with Main Brain and Deep Brain.
+    /// Creates a new Bot with Conversation Brain and Work Brain.
     ///
-    /// The Bot manages two agents:
-    /// - Main Brain: LlmAgent that handles external communication with Bot protocol
-    /// - Deep Brain: ReActAgent for complex reasoning tasks (accessible via deep-think tool)
+    /// The Bot manages two brains:
+    /// - Conversation Brain: LlmAgent that handles external communication and task coordination
+    /// - Work Brain: ReActAgent that executes complex tasks assigned by Conversation Brain
     ///
     /// # Arguments
     /// * `runtime` - Shared runtime
     /// * `name` - Bot name
     /// * `model` - Model to use (e.g., "gpt-4o")
-    /// * `tool_constructors` - Tool constructors (called twice: once for Main Brain, once for Deep Brain)
+    /// * `tool_constructors` - Tool constructors for Work Brain tools
     /// * `sink` - Event sink for Bot events
     pub fn new(
         runtime: Rc<agent_core::Runtime>,
@@ -207,9 +149,124 @@ impl Bot {
         let model = model.into();
         anyhow::ensure!(!name.trim().is_empty(), "bot name must be non-empty");
 
-        // Bot protocol prompt (only for Main Brain)
-        let bot_protocol = format!(
-            "You are @{name}. You MUST follow this output format in EVERY response:\n\n\
+        // Create shared goal state
+        let goal_state = GoalState::new();
+
+        // Setup DataStore and create dir_node for this bot
+        let dir_node = if let Some(data_store) = runtime.data_store() {
+            let store = Rc::new(agent_core::DataStore::new(data_store.root().to_path_buf()));
+            let bot_dir = store.root_dir().subdir(&name);
+            Some(bot_dir)
+        } else {
+            None
+        };
+
+        // Create Work Brain Session (clean, no Bot protocol, only has tools)
+        let mut work_brain_builder = SessionBuilder::new(Rc::clone(&runtime))
+            .set_default_model(model.clone())
+            .add_tool(Box::new(agent_core::tools::DebugTool::new()));
+
+        // Add tools to Work Brain
+        for constructor in tool_constructors.borrow().iter() {
+            work_brain_builder = work_brain_builder.add_tool(constructor());
+        }
+
+        let work_brain_session = work_brain_builder.build()?;
+
+        // Create Conversation Brain Session with GoalTool and PersistentHistory
+        let mut conversation_brain_builder = SessionBuilder::new(runtime)
+            .set_default_model(model)
+            .add_tool(Box::new(agent_core::tools::DebugTool::new()))
+            .add_tool(Box::new(GoalTool::new(goal_state.clone())));
+
+        // Set dir_node for persistent storage
+        if let Some(dir_node) = dir_node {
+            conversation_brain_builder = conversation_brain_builder.set_dir_node(dir_node);
+        }
+
+        // Use PersistentHistory for Conversation Brain with compression enabled
+        conversation_brain_builder = conversation_brain_builder
+            .set_history(Box::new(
+                agent_core::PersistentHistory::new()
+            ));
+
+        let conversation_brain_session = conversation_brain_builder.build()?;
+
+        Self::new_with_sessions(
+            conversation_brain_session,
+            work_brain_session,
+            name,
+            goal_state,
+            sink,
+        )
+    }
+
+    fn new_with_sessions(
+        conversation_brain_session: Session,
+        work_brain_session: Session,
+        name: impl Into<String>,
+        goal_state: GoalState,
+        sink: impl BotEventSink + 'static,
+    ) -> Result<Self> {
+        let name = name.into();
+
+        // Create holder for conversation brain reference (used by Work Brain sink)
+        let conversation_brain_ref = Rc::new(RefCell::new(None));
+
+        // Create Work Brain (ReActAgent)
+        let work_brain_agent = Box::new(ReActAgent::new().with_logging(true)) as Box<dyn Agent>;
+        let work_brain = Brain::new(
+            work_brain_session,
+            work_brain_agent,
+            WorkBrainSink {
+                bot_name: name.clone(),
+                conversation_brain: Rc::clone(&conversation_brain_ref),
+            },
+        )?;
+
+        // Create Inner with work_brain reference
+        let inner = Rc::new(RefCell::new(Inner {
+            sink: Box::new(sink),
+            work_brain: Some(work_brain.clone()),
+            goal_state: goal_state.clone(),
+        }));
+
+        // Bot protocol prompt for Conversation Brain
+        let bot_protocol = Self::build_conversation_brain_prompt(&name, &goal_state);
+
+        // Create Conversation Brain (LlmAgent) with Bot protocol prompt
+        let conversation_brain_agent = Box::new(LlmAgent::new()) as Box<dyn Agent>;
+        let conversation_brain = Brain::new_with_system_prompts(
+            conversation_brain_session,
+            conversation_brain_agent,
+            BrainToBotSink {
+                bot_name: name.clone(),
+                inner: Rc::clone(&inner),
+            },
+            vec![bot_protocol],
+        )?;
+
+        // Store conversation_brain reference for Work Brain sink
+        *conversation_brain_ref.borrow_mut() = Some(conversation_brain.clone());
+
+        Ok(Self {
+            name,
+            conversation_brain: conversation_brain.clone(),
+            work_brain,
+            goal_state,
+            _inner: inner,
+            _inbox: Rc::new(RefCell::new(VecDeque::new())),
+        })
+    }
+
+    fn build_conversation_brain_prompt(bot_name: &str, _goal_state: &GoalState) -> String {
+        format!(
+            "You are @{bot_name}. You are the Conversation Brain responsible for external communication and task coordination.\n\n\
+            GOAL MANAGEMENT:\n\
+            - Use 'set-goal' tool to define your current objective\n\
+            - Use 'get-goal' tool to check the current goal\n\
+            - The goal guides both you and the work brain\n\
+            - Update the goal as tasks evolve\n\n\
             ═══════════════════════════════════════════════════════\n\
             ⚠️  CRITICAL OUTPUT RULE (NEVER SKIP THIS):\n\
             Every response MUST include: @recipient: message\n\
@@ -224,112 +281,25 @@ impl Bot {
             THINKING (Optional):\n\
             You can output thinking with @self: before your reply.\n\
             @self messages will be filtered out automatically.\n\n\
+            WORK DELEGATION:\n\
+            For complex tasks requiring multiple steps or deep analysis:\n\
+            - Send tasks to @work-brain: with clear instructions\n\
+            - Work brain will use tools and reasoning to complete the task\n\
+            - You'll receive results as 'Work brain result:' input\n\
+            - Then respond to the original sender with the results\n\n\
+            Example:\n\
+            Input:  @user: Analyze the codebase structure\n\
+            Output: @work-brain: Analyze the codebase structure. List all modules and their purposes.\n\
+            [Work brain completes task...]\n\
+            Input:  Work brain result: [analysis results]\n\
+            Output: @user: Here's the codebase analysis: [results]\n\n\
             ✓ CORRECT:\n\
-            Input:  @alice: Hello\n\
-            Output: @alice: Hi there!\n\n\
-            Input:  @bob: What's 2+2?\n\
-            Output: @self: Let me calculate...\n\
-            @bob: 2+2 equals 4.\n\n\
-            Input:  @user: Complex question\n\
-            Output: @self: Need to think about this step by step.\n\
-            @self: First, I should analyze X.\n\
-            @self: Then consider Y.\n\
-            @user: Here's my answer after thinking...\n\n\
+            Output: @alice: Hi there!\n\
+            Output: @work-brain: Please analyze file.rs\n\n\
             ✗ WRONG (These will FAIL):\n\
             Output: Hello!                    ← MISSING @recipient:\n\
-            Output: Let me think...           ← MISSING @recipient:\n\n\
-            AFTER USING TOOLS:\n\
-            Still output with @recipient: prefix!\n\
-            Example:\n\
-            Input: @user: read file.txt\n\
-            [you use file-read tool]\n\
-            Output: @user: The file contains...\n\n\
-            TOOL STRATEGY:\n\
-            - Complex tasks (2+ steps): Use deep-think tool\n\
-            - Simple tasks (1 step): Use direct tools\n"
-        );
-
-        // Create Deep Brain Session (clean, no Bot protocol, only has tools)
-        let mut deep_brain_builder = SessionBuilder::new(Rc::clone(&runtime))
-            .set_default_model(model.clone())
-            .add_tool(Box::new(agent_core::tools::DebugTool::new()));
-
-        // Add tools to Deep Brain
-        for constructor in tool_constructors.borrow().iter() {
-            deep_brain_builder = deep_brain_builder.add_tool(constructor());
-        }
-
-        let deep_brain_session = Rc::new(deep_brain_builder.build()?);
-
-        // Setup DataStore and create dir_node for this bot
-        let dir_node = if let Some(data_store) = runtime.data_store() {
-            let store = Rc::new(agent_core::DataStore::new(data_store.root().to_path_buf()));
-            let bot_dir = store.root_dir().subdir(&name);
-            Some(bot_dir)
-        } else {
-            None
-        };
-
-        // Create Main Brain Session with DeepThinkTool and PersistentHistory
-        let mut main_brain_builder = SessionBuilder::new(runtime)
-            .set_default_model(model)
-            .add_tool(Box::new(agent_core::tools::DebugTool::new()))
-            .add_tool(Box::new(BotDeepThinkTool::new(Rc::clone(&deep_brain_session))));
-
-        // Add tools to Main Brain
-        for constructor in tool_constructors.borrow().iter() {
-            main_brain_builder = main_brain_builder.add_tool(constructor());
-        }
-
-        // Set dir_node for persistent storage
-        if let Some(dir_node) = dir_node {
-            main_brain_builder = main_brain_builder.set_dir_node(dir_node);
-        }
-
-        // Use PersistentHistory for Main Brain with compression enabled
-        main_brain_builder = main_brain_builder
-            .set_history(Box::new(
-                agent_core::PersistentHistory::new()
-            ));
-
-        let main_brain_session = main_brain_builder.build()?;
-
-        Self::new_with_sessions(main_brain_session, name, bot_protocol, deep_brain_session, sink)
-    }
-
-    fn new_with_sessions(
-        main_brain_session: Session,
-        name: impl Into<String>,
-        bot_protocol: String,
-        deep_brain_session: Rc<Session>,
-        sink: impl BotEventSink + 'static,
-    ) -> Result<Self> {
-        let name = name.into();
-
-        let inner = Rc::new(RefCell::new(Inner {
-            sink: Box::new(sink),
-        }));
-
-        // Create Main Brain (LlmAgent) with Bot protocol prompt
-        let main_brain = Box::new(LlmAgent::new()) as Box<dyn Agent>;
-
-        let brain = Brain::new_with_system_prompts(
-            main_brain_session,
-            main_brain,
-            BrainToBotSink {
-                bot_name: name.clone(),
-                inner: Rc::clone(&inner),
-            },
-            vec![bot_protocol],
-        )?;
-
-        Ok(Self {
-            name,
-            brain,
-            deep_brain_session,
-            _inner: inner,
-            _inbox: Rc::new(RefCell::new(VecDeque::new())),
-        })
+            Output: Let me think...           ← MISSING @recipient:\n"
+        )
     }
 
     pub fn name(&self) -> &str {
@@ -343,11 +313,12 @@ impl Bot {
         self._inbox.borrow_mut().push_back(msg.clone());
 
         let line = format!("@{}: {}", msg.from, msg.content);
-        self.brain.push_input(line);
+        self.conversation_brain.push_input(line);
     }
 
     pub fn shutdown(&self) {
-        self.brain.shutdown();
+        self.conversation_brain.shutdown();
+        self.work_brain.shutdown();
     }
 }
 

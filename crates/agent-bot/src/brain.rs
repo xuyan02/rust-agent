@@ -51,6 +51,17 @@ pub struct Brain {
     _not_send: PhantomData<Rc<()>>,
 }
 
+impl Clone for Brain {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Rc::clone(&self.inner),
+            notify: Rc::clone(&self.notify),
+            _sink: Rc::clone(&self._sink),
+            _not_send: PhantomData,
+        }
+    }
+}
+
 impl Brain {
     pub fn push_input(&self, text: impl Into<String>) {
         {
