@@ -199,6 +199,7 @@ struct Inner {
     introspection_brain: Rc<RefCell<Option<Box<Brain>>>>,
     goal_state: GoalState,
     memory_state: MemoryState,
+    soul_state: crate::SoulState,
     knowledge_base: Rc<crate::KnowledgeBase>,
 }
 
@@ -206,6 +207,7 @@ pub struct Bot {
     name: String,
     goal_state: GoalState,
     memory_state: MemoryState,
+    soul_state: crate::SoulState,
     knowledge_base: Rc<crate::KnowledgeBase>,
 
     // Keep alive for BrainToBotSink and routing.
@@ -244,9 +246,10 @@ impl Bot {
         let store = Rc::new(agent_core::DataStore::new(data_store.root().to_path_buf()));
         let bot_dir = store.root_dir().subdir(&name);
 
-        // Create goal/memory state with DataNode
+        // Create goal/memory/soul state with DataNode
         let goal_state = GoalState::new(bot_dir.node("goal"));
         let memory_state = MemoryState::new(bot_dir.node("memory"));
+        let soul_state = crate::SoulState::new(bot_dir.node("soul"));
 
         // Create separate directories for work brain and conversation brain histories
         let work_dir = bot_dir.subdir("work");
@@ -257,19 +260,28 @@ impl Bot {
         let knowledge_dir = bot_dir.full_path().join("knowledge");
         let knowledge_base = Rc::new(crate::KnowledgeBase::new(knowledge_dir));
 
+        // Create TalkChannel for communication with conversation brain
+        // We'll set the actual conversation_brain reference later
+        let conversation_brain_ref: Rc<RefCell<Option<Box<Brain>>>> = Rc::new(RefCell::new(None));
+        let talk_channel = crate::TalkChannel::new(Rc::clone(&conversation_brain_ref));
+
         // Work Brain prompt and session
         let work_brain_prompt = Self::build_work_brain_prompt(&name);
 
-        // Create Work Brain Session (has GoalTool and MemoryTool)
+        // Create Work Brain Session (has GoalTool, MemoryTool, KnowledgeTool, and TalkTool)
         let mut work_brain_builder = SessionBuilder::new(Rc::clone(&runtime))
             .set_default_model(model.clone())
             .add_tool(Box::new(agent_core::tools::DebugTool::new()))
             .add_tool(Box::new(GoalTool::new(goal_state.clone())))
             .add_tool(Box::new(MemoryTool::new(memory_state.clone())))
+            .add_tool(Box::new(crate::KnowledgeTool::new(Rc::clone(&knowledge_base))))
+            .add_tool(Box::new(crate::TalkTool::new(talk_channel.clone(), "Work brain")))
             .add_system_prompt_segment(Box::new(agent_core::StaticSystemPromptSegment::new(work_brain_prompt)))
+            .add_system_prompt_segment(Box::new(crate::SoulSegment::new(soul_state.clone())))
             .add_system_prompt_segment(Box::new(crate::GoalSegment::new(goal_state.clone())))
             .add_system_prompt_segment(Box::new(crate::MemorySegment::new(memory_state.clone())))
-            .set_history(Box::new(agent_core::PersistentHistory::new(Rc::clone(&work_dir))));
+            .set_history(Box::new(agent_core::PersistentHistory::new(Rc::clone(&work_dir))))
+            .set_dir_node(Rc::clone(&work_dir));
             // NOTE: BotPromptSegment not added to Work Brain - it needs freedom to think/act in detail
 
         // Add tools to Work Brain
@@ -289,6 +301,7 @@ impl Bot {
             .add_tool(Box::new(GoalTool::new(goal_state.clone())))
             .add_tool(Box::new(MemoryTool::new(memory_state.clone())))
             .add_system_prompt_segment(Box::new(agent_core::StaticSystemPromptSegment::new(bot_protocol)))
+            .add_system_prompt_segment(Box::new(crate::SoulSegment::new(soul_state.clone())))
             .add_system_prompt_segment(Box::new(crate::BotPromptSegment::new(goal_state.clone(), memory_state.clone())))
             .set_history(Box::new(agent_core::PersistentHistory::new(conv_dir.clone())))
             .build()?;
@@ -302,8 +315,12 @@ impl Bot {
             .add_tool(Box::new(crate::KnowledgeTool::new(Rc::clone(&knowledge_base))))
             .add_tool(Box::new(crate::HistoryTool::new(conv_dir, work_dir)))
             .add_tool(Box::new(MemoryTool::new(memory_state.clone())))
+            .add_tool(Box::new(crate::SoulTool::new(soul_state.clone())))
+            .add_tool(Box::new(crate::TalkTool::new(talk_channel.clone(), "Introspection brain")))
             .add_system_prompt_segment(Box::new(agent_core::StaticSystemPromptSegment::new(introspection_prompt.to_string())))
-            .set_history(Box::new(agent_core::PersistentHistory::new(introspection_dir)))
+            .add_system_prompt_segment(Box::new(crate::SoulSegment::new(soul_state.clone())))
+            .set_history(Box::new(agent_core::PersistentHistory::new(Rc::clone(&introspection_dir))))
+            .set_dir_node(introspection_dir)
             .build()?;
 
         Self::new_with_sessions(
@@ -313,8 +330,10 @@ impl Bot {
             name,
             goal_state,
             memory_state,
+            soul_state,
             knowledge_base,
             sink,
+            conversation_brain_ref,
         )
     }
 
@@ -325,13 +344,14 @@ impl Bot {
         name: impl Into<String>,
         goal_state: GoalState,
         memory_state: MemoryState,
+        soul_state: crate::SoulState,
         knowledge_base: Rc<crate::KnowledgeBase>,
         sink: impl BotEventSink + 'static,
+        conversation_brain_ref: Rc<RefCell<Option<Box<Brain>>>>,
     ) -> Result<Self> {
         let name = name.into();
 
         // Create Inner early with empty brains
-        let conversation_brain_ref = Rc::new(RefCell::new(None));
         let work_brain_ref = Rc::new(RefCell::new(None));
         let introspection_brain_ref = Rc::new(RefCell::new(None));
 
@@ -342,13 +362,14 @@ impl Bot {
             introspection_brain: Rc::clone(&introspection_brain_ref),
             goal_state: goal_state.clone(),
             memory_state: memory_state.clone(),
+            soul_state: soul_state.clone(),
             knowledge_base: Rc::clone(&knowledge_base),
         }));
 
-        // Create Work Brain (ReActAgent) with longer timeout for complex tasks
-        let work_brain_agent = Box::new(ReActAgent::new().with_logging(true)) as Box<dyn Agent>;
+        // Create Work Brain (ReActAgent) - no timeout limit for complex tasks
+        let work_brain_agent = Box::new(ReActAgent::new()) as Box<dyn Agent>;
         let work_brain_config = BrainConfig::new()
-            .with_timeout(std::time::Duration::from_secs(30 * 60)); // 30 minutes
+            .with_timeout(std::time::Duration::from_secs(24 * 60 * 60)); // 24 hours (effectively no limit)
         let work_brain = Brain::new_with_config(
             "work-brain",
             work_brain_session,
@@ -379,7 +400,7 @@ impl Bot {
         *conversation_brain_ref.borrow_mut() = Some(Box::new(conversation_brain));
 
         // Create Introspection Brain (ReActAgent) - background worker with reasoning
-        let introspection_brain_agent = Box::new(ReActAgent::new().with_logging(true)) as Box<dyn Agent>;
+        let introspection_brain_agent = Box::new(ReActAgent::new()) as Box<dyn Agent>;
         let introspection_brain_config = BrainConfig::new()
             .with_timeout(std::time::Duration::from_secs(10 * 60)); // 10 minutes
         let introspection_brain = Brain::new_with_config(
@@ -396,10 +417,17 @@ impl Bot {
         // Store introspection_brain
         *introspection_brain_ref.borrow_mut() = Some(Box::new(introspection_brain));
 
+        // Trigger wake up: Send initial message to introspection brain
+        let wake_up_message = include_str!("../prompts/wake_up.md");
+        if let Some(brain) = introspection_brain_ref.borrow().as_ref() {
+            brain.push_input(wake_up_message.to_string());
+        }
+
         Ok(Self {
             name,
             goal_state,
             memory_state,
+            soul_state,
             knowledge_base,
             _inner: inner,
         })

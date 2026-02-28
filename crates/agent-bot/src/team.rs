@@ -362,7 +362,11 @@ impl BotEventSink for TeamBotSink {
                 let mut inner = self.inner.borrow_mut();
 
                 // Route message based on recipient
-                if message.to == inner.user_name {
+                // Check both configured user_name and common aliases like "user"
+                let is_user_message = message.to == inner.user_name
+                    || message.to.eq_ignore_ascii_case("user");
+
+                if is_user_message {
                     // Message to user - only leader can send to user
                     if message.from == inner.leader_name {
                         inner.sink.emit(TeamEvent::UserMessage {

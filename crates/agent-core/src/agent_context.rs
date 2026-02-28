@@ -15,6 +15,7 @@ pub struct AgentContext<'a> {
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
     disable_tools: bool,
+    tool_whitelist: Option<Vec<String>>,
     dir_node: Option<Rc<DirNode>>,
 }
 
@@ -80,6 +81,7 @@ impl<'a> AgentContext<'a> {
     }
 
     /// Tools visible from this context (local first, then parent chain).
+    /// If a tool whitelist is set, only tools with IDs in the whitelist are returned.
     pub fn tools(&self) -> Vec<&dyn Tool> {
         // If tools are disabled, return empty list
         if self.disable_tools {
@@ -103,6 +105,11 @@ impl<'a> AgentContext<'a> {
             }
         }
 
+        // Apply tool whitelist if set
+        if let Some(ref whitelist) = self.tool_whitelist {
+            out.retain(|tool| whitelist.contains(&tool.spec().id));
+        }
+
         out
     }
 }
@@ -113,6 +120,7 @@ pub struct AgentContextBuilder<'a> {
     system_prompt_segments: Vec<Box<dyn crate::SystemPromptSegment>>,
     tools: Vec<Box<dyn Tool>>,
     disable_tools: bool,
+    tool_whitelist: Option<Vec<String>>,
     dir_node: Option<Rc<DirNode>>,
 }
 
@@ -124,6 +132,7 @@ impl<'a> AgentContextBuilder<'a> {
             system_prompt_segments: vec![],
             tools: vec![],
             disable_tools: false,
+            tool_whitelist: None,
             dir_node: None,
         }
     }
@@ -163,6 +172,13 @@ impl<'a> AgentContextBuilder<'a> {
         self
     }
 
+    /// Set a whitelist of tool IDs. Only tools with IDs in this list will be available.
+    /// If the whitelist is empty, no tools will be available.
+    pub fn set_tool_whitelist(mut self, whitelist: Vec<String>) -> Self {
+        self.tool_whitelist = Some(whitelist);
+        self
+    }
+
     pub fn set_dir_node(mut self, dir_node: Rc<DirNode>) -> Self {
         self.dir_node = Some(dir_node);
         self
@@ -175,6 +191,7 @@ impl<'a> AgentContextBuilder<'a> {
             system_prompt_segments: self.system_prompt_segments,
             tools: self.tools,
             disable_tools: self.disable_tools,
+            tool_whitelist: self.tool_whitelist,
             dir_node: self.dir_node,
         })
     }

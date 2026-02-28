@@ -120,7 +120,7 @@ fn main() -> Result<()> {
             .build()?;
 
         let (tx, rx) = mpsc::channel();
-        let brain = Brain::new(session, Box::new(LlmAgent::new()), ChannelSink { tx })?;
+        let brain = Brain::new("brain", session, Box::new(LlmAgent::new()), ChannelSink { tx })?;
 
         if let Some(input) = input {
             brain.push_input(input);

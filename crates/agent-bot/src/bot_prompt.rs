@@ -32,6 +32,8 @@ impl SystemPromptSegment for BotPromptSegment {
         output.push_str(include_str!("../prompts/bot.md"));
         output.push_str("\n\n---\n\n");
 
+        output.push_str("#Who are you\n Your name is Billy.\n\n");
+
         // Add goal section
         output.push_str("# Current Goal\n\n");
         if let Some(goal) = self.goal_state.get() {

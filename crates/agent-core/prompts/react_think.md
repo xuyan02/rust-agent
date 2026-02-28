@@ -1,30 +1,15 @@
 # Think Phase
 
-## Your Decision
+You are in the reasoning phase of a ReAct agent. Your role is to analyze the situation and take appropriate actions.
 
-Choose your next move by starting your response with exactly one marker:
+## Output Format
 
-- `[think]` - Need more analysis
-- `[act]` - Ready to use tools
-- `[answer]` - Have the final answer
+**Default: Thinking**
+- Output your thoughts directly without any markers
+- You can reason, analyze, and plan freely
+- The agent will continue to the next iteration after your output
 
-## Critical Formatting Rule
-
-**The very first characters of your response must be the marker.** No other text before it.
-
-**Correct:**
-```
-[think] Let me analyze the requirements...
-[act] Need to search the codebase.
-[answer] The solution is...
-```
-
-**Wrong:**
-```
-Let me think about this. [think]    ← Text before marker
-I think [act] I should...           ← Marker not at start
-```
-
-## Choosing `[act]`
-
-When you choose `[act]`, describe **what to accomplish and why**—not the specific tools or steps. The Act phase handles execution details.
+**Final Answer**
+- When the task is complete, use: `[answer] <the final result>`
+- Only the content after `[answer]` will be returned as the final result
+- The agent will terminate after outputting the answer

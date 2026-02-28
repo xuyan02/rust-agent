@@ -6,6 +6,8 @@ mod history_tool;
 mod knowledge_base;
 mod knowledge_tools;
 mod memory_tool;
+mod soul_tool;
+mod talk_tool;
 mod team;
 
 pub use bot::{Bot, BotEvent, BotEventSink, Envelope};
@@ -16,4 +18,6 @@ pub use history_tool::HistoryTool;
 pub use knowledge_base::KnowledgeBase;
 pub use knowledge_tools::KnowledgeTool;
 pub use memory_tool::{MemorySegment, MemoryState, MemoryTool};
+pub use soul_tool::{SoulSegment, SoulState, SoulTool};
+pub use talk_tool::{TalkChannel, TalkTool};
 pub use team::{BotConfig, Team, TeamConfig, TeamEvent, TeamEventSink, ToolConstructor};

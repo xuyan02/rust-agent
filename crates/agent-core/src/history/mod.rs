@@ -93,6 +93,32 @@ impl InMemoryHistory {
     pub fn is_empty(&self) -> bool {
         self.messages.borrow().is_empty()
     }
+
+    /// Adjust keep_from position to not split tool call/result pairs.
+    /// If keep_from points to a Tool message, move it back to include the preceding Assistant ToolCalls.
+    fn adjust_keep_from_for_tool_calls(messages: &[ChatMessage], mut keep_from: usize) -> usize {
+        use crate::llm::{ChatRole, ChatContent};
+
+        if keep_from == 0 || keep_from >= messages.len() {
+            return keep_from;
+        }
+
+        // Check if keep_from points to a Tool message
+        if messages[keep_from].role == ChatRole::Tool {
+            // Search backward for the corresponding Assistant ToolCalls message
+            for i in (0..keep_from).rev() {
+                if messages[i].role == ChatRole::Assistant {
+                    if matches!(messages[i].content, ChatContent::ToolCalls(_)) {
+                        // Found the ToolCalls message, move keep_from to before it
+                        keep_from = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        keep_from
+    }
 }
 
 #[async_trait(?Send)]
@@ -106,9 +132,13 @@ impl History for InMemoryHistory {
         msgs.push(message);
 
         // Implement sliding window: remove oldest messages if limit exceeded
-        // Also ensure we don't start with Tool messages (invalid for OpenAI API)
+        // Also ensure we don't split tool call/result pairs and don't start with Tool messages
         if msgs.len() > self.max_size {
-            let keep_from = msgs.len() - self.max_size;
+            let mut keep_from = msgs.len() - self.max_size;
+
+            // Adjust keep_from to not split tool call pairs
+            keep_from = Self::adjust_keep_from_for_tool_calls(&msgs, keep_from);
+
             msgs.drain(0..keep_from);
 
             // Clean leading Tool messages

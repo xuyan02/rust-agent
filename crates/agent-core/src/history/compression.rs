@@ -102,20 +102,23 @@ impl CompressionStrategy {
             }
         }
 
+        // Adjust keep_from to not split tool call pairs
+        keep_from = self.adjust_keep_from_for_tool_calls(messages, keep_from);
+
         // Adjust compression range to not overlap with keep_from
         if compress_until > keep_from {
             compress_until = keep_from;
         }
 
-        // Ensure we don't split tool call pairs
-        compress_until = self.adjust_for_tool_calls(messages, compress_until);
+        // Ensure we don't split tool call pairs at compress_until boundary
+        compress_until = self.adjust_compress_until_for_tool_calls(messages, compress_until);
 
         (compress_until, keep_from)
     }
 
-    /// Adjust compression boundary to not split tool call pairs.
-    /// If compress_until is in the middle of a tool call pair, move it forward.
-    fn adjust_for_tool_calls(&self, messages: &[ChatMessage], mut compress_until: usize) -> usize {
+    /// Adjust compress_until boundary to not split tool call pairs.
+    /// If compress_until is in the middle of a tool call pair, move it forward to include all tool results.
+    fn adjust_compress_until_for_tool_calls(&self, messages: &[ChatMessage], mut compress_until: usize) -> usize {
         if compress_until == 0 || compress_until >= messages.len() {
             return compress_until;
         }
@@ -144,6 +147,30 @@ impl CompressionStrategy {
         }
 
         compress_until
+    }
+
+    /// Adjust keep_from boundary to not split tool call pairs.
+    /// If keep_from points to a Tool message, move it backward to include the preceding Assistant ToolCalls.
+    fn adjust_keep_from_for_tool_calls(&self, messages: &[ChatMessage], mut keep_from: usize) -> usize {
+        if keep_from == 0 || keep_from >= messages.len() {
+            return keep_from;
+        }
+
+        // Check if keep_from points to a Tool message
+        if messages[keep_from].role == ChatRole::Tool {
+            // Search backward for the corresponding Assistant ToolCalls message
+            for i in (0..keep_from).rev() {
+                if messages[i].role == ChatRole::Assistant {
+                    if let crate::llm::ChatContent::ToolCalls(_) = &messages[i].content {
+                        // Found the ToolCalls message, move keep_from to this position
+                        keep_from = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        keep_from
     }
 
     /// Clean leading Tool messages to ensure valid OpenAI API format.
@@ -331,5 +358,65 @@ mod tests {
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, ChatRole::User);
+    }
+
+    #[test]
+    fn test_adjust_compress_until_for_tool_calls() {
+        let strategy = CompressionStrategy::new(CompressionConfig::default());
+
+        // Setup: User -> Assistant(ToolCalls) -> Tool -> Tool -> User
+        let tool_calls = serde_json::json!([{
+            "id": "call1",
+            "function_name": "func1",
+            "arguments": {}
+        }]);
+
+        let messages = vec![
+            ChatMessage::user_text("Question".to_string()),
+            ChatMessage::assistant_tool_calls(tool_calls),
+            ChatMessage::tool_result("call1".to_string(), "result1".to_string()),
+            ChatMessage::tool_result("call2".to_string(), "result2".to_string()),
+            ChatMessage::user_text("Follow-up".to_string()),
+        ];
+
+        // If compress_until is 2 (right after ToolCalls), it should move to 4 to include all Tool messages
+        let adjusted = strategy.adjust_compress_until_for_tool_calls(&messages, 2);
+        assert_eq!(adjusted, 4, "Should include all Tool messages after ToolCalls");
+
+        // If compress_until is already at a safe position, no adjustment needed
+        let adjusted = strategy.adjust_compress_until_for_tool_calls(&messages, 1);
+        assert_eq!(adjusted, 1, "Safe position should not be adjusted");
+    }
+
+    #[test]
+    fn test_adjust_keep_from_for_tool_calls() {
+        let strategy = CompressionStrategy::new(CompressionConfig::default());
+
+        // Setup: User -> Assistant(ToolCalls) -> Tool -> Tool -> User
+        let tool_calls = serde_json::json!([{
+            "id": "call1",
+            "function_name": "func1",
+            "arguments": {}
+        }]);
+
+        let messages = vec![
+            ChatMessage::user_text("Question".to_string()),
+            ChatMessage::assistant_tool_calls(tool_calls),
+            ChatMessage::tool_result("call1".to_string(), "result1".to_string()),
+            ChatMessage::tool_result("call2".to_string(), "result2".to_string()),
+            ChatMessage::user_text("Follow-up".to_string()),
+        ];
+
+        // If keep_from is 2 (points to Tool message), it should move back to 1 (the ToolCalls)
+        let adjusted = strategy.adjust_keep_from_for_tool_calls(&messages, 2);
+        assert_eq!(adjusted, 1, "Should move back to include the ToolCalls message");
+
+        // If keep_from is 3 (another Tool message), it should also move back to 1
+        let adjusted = strategy.adjust_keep_from_for_tool_calls(&messages, 3);
+        assert_eq!(adjusted, 1, "Should move back to include the ToolCalls message");
+
+        // If keep_from is already at a safe position (User message), no adjustment needed
+        let adjusted = strategy.adjust_keep_from_for_tool_calls(&messages, 4);
+        assert_eq!(adjusted, 4, "Safe position should not be adjusted");
     }
 }

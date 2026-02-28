@@ -43,6 +43,30 @@ impl PersistentHistory {
         }
     }
 
+    /// Remove trailing unpaired tool calls from the end of the message list.
+    /// This handles the case where a crash/interruption occurred after a tool call
+    /// but before receiving the tool result(s).
+    fn remove_trailing_unpaired_tool_calls(messages: &mut Vec<ChatMessage>) {
+        use crate::llm::{ChatRole, ChatContent};
+
+        if messages.is_empty() {
+            return;
+        }
+
+        // Check if the last message is an Assistant message with ToolCalls
+        if let Some(last_msg) = messages.last() {
+            if last_msg.role == ChatRole::Assistant {
+                if matches!(last_msg.content, ChatContent::ToolCalls(_)) {
+                    // This is an unpaired tool call - remove it
+                    messages.pop();
+                    tracing::warn!(
+                        "[PersistentHistory] Removed unpaired tool call at end of history (likely from crash/interruption)"
+                    );
+                }
+            }
+        }
+    }
+
     /// Get the history file path.
     fn get_path(&self) -> Result<PathBuf> {
         let full_path = self.dir_node.full_path().join("history.yaml");
@@ -73,9 +97,12 @@ impl PersistentHistory {
             format!("failed to read history from {}", path.display())
         })?;
 
-        let messages: Vec<ChatMessage> = serde_yaml::from_str(&content).with_context(|| {
+        let mut messages: Vec<ChatMessage> = serde_yaml::from_str(&content).with_context(|| {
             format!("failed to parse history YAML from {}", path.display())
         })?;
+
+        // Clean up unpaired tool calls at the end (from crashes/interruptions)
+        Self::remove_trailing_unpaired_tool_calls(&mut messages);
 
         *self.cache.borrow_mut() = Some(messages.clone());
         Ok(messages)

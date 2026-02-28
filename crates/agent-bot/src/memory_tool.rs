@@ -151,15 +151,6 @@ impl Tool for MemoryTool {
                     },
                 },
                 FunctionSpec {
-                    name: "get-memory-size".to_string(),
-                    description: "Get the current memory size (number of records and precise token count).".to_string(),
-                    parameters: ObjectSpec {
-                        properties: vec![],
-                        required: vec![],
-                        additional_properties: false,
-                    },
-                },
-                FunctionSpec {
                     name: "replace-memories".to_string(),
                     description: "Replace all current memories with a new compressed set. Used for memory compression. Provide an array of memory strings.".to_string(),
                     parameters: ObjectSpec {
@@ -196,7 +187,9 @@ impl Tool for MemoryTool {
                 self.memory_state.add(memory.to_string());
                 // Flush immediately to persist changes
                 self.memory_state.flush().await?;
-                Ok(format!("Memory recorded: {}", memory))
+
+                let token_count = self.memory_state.count_tokens();
+                Ok(format!("Memory recorded: {} (total: {} tokens)", memory, token_count))
             }
             "list-memories" => {
                 let memories = self.memory_state.get_all();
@@ -209,14 +202,6 @@ impl Tool for MemoryTool {
                     }
                     Ok(result)
                 }
-            }
-            "get-memory-size" => {
-                let token_count = self.memory_state.count_tokens();
-                let memory_count = self.memory_state.get_all().len();
-                Ok(format!(
-                    "Memory size: {} memories, {} tokens",
-                    memory_count, token_count
-                ))
             }
             "replace-memories" => {
                 let new_memories = args
