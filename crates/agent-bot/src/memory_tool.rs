@@ -1,5 +1,5 @@
 use agent_core::tools::{ArraySpec, FunctionSpec, ObjectSpec, PropertySpec, StringSpec, Tool, ToolSpec, TypeSpec};
-use agent_core::{AgentContext, DataNode, SystemPromptSegment};
+use agent_core::{AgentContext, DataNode, SystemPromptSegment, estimate_tokens};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
@@ -57,12 +57,12 @@ impl MemoryState {
         }
     }
 
-    /// Count total tokens in all memories (rough estimate: 1 token ≈ 4 chars)
+    /// Count total tokens in all memories using precise tiktoken estimation
     pub fn count_tokens(&self) -> usize {
         let memories = self.get_all();
-        let total_chars: usize = memories.iter().map(|m| m.len()).sum();
-        // Rough token estimate: 1 token ≈ 4 characters
-        total_chars / 4
+        memories.iter()
+            .map(|m| estimate_tokens(m))
+            .sum()
     }
 }
 
@@ -92,10 +92,14 @@ impl SystemPromptSegment for MemorySegment {
         if memories.is_empty() {
             Ok(String::new())
         } else {
+            let token_count = self.memory_state.count_tokens();
+            let memory_count = memories.len();
+
             let mut result = String::from(
                 "═══════════════════════════════════════════════════════\n\
                 MEMORY:\n"
             );
+            result.push_str(&format!("(Total: {} memories, {} tokens)\n\n", memory_count, token_count));
             for (i, memory) in memories.iter().enumerate() {
                 result.push_str(&format!("{}. {}\n", i + 1, memory));
             }
@@ -147,7 +151,7 @@ impl Tool for MemoryTool {
                 },
                 FunctionSpec {
                     name: "get-memory-size".to_string(),
-                    description: "Get the current memory size in tokens (rough estimate).".to_string(),
+                    description: "Get the current memory size (number of records and precise token count).".to_string(),
                     parameters: ObjectSpec {
                         properties: vec![],
                         required: vec![],
@@ -209,7 +213,7 @@ impl Tool for MemoryTool {
                 let token_count = self.memory_state.count_tokens();
                 let memory_count = self.memory_state.get_all().len();
                 Ok(format!(
-                    "Memory size: {} memories, ~{} tokens",
+                    "Memory size: {} memories, {} tokens",
                     memory_count, token_count
                 ))
             }
@@ -228,7 +232,7 @@ impl Tool for MemoryTool {
 
                 let new_token_count = self.memory_state.count_tokens();
                 Ok(format!(
-                    "Memories replaced: {} memories, ~{} tokens",
+                    "Memories replaced: {} memories, {} tokens",
                     new_memories.len(),
                     new_token_count
                 ))
