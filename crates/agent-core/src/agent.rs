@@ -83,9 +83,13 @@ impl Default for LlmAgent {
 #[async_trait(?Send)]
 impl Agent for LlmAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
+        tracing::info!("[LlmAgent] Getting history");
         let mut messages: Vec<ChatMessage> = vec![];
         messages.extend(ctx.history().get_all(ctx).await?);
 
-        ctx.session().runtime().execute(ctx, messages).await
+        tracing::info!("[LlmAgent] Calling runtime.execute with {} messages", messages.len());
+        ctx.session().runtime().execute(ctx, messages).await?;
+        tracing::info!("[LlmAgent] runtime.execute completed");
+        Ok(())
     }
 }

@@ -2,6 +2,21 @@ use crate::llm::{ChatMessage, ChatRole};
 use super::token_estimator::estimate_message_tokens;
 use crate::Agent;
 
+/// Safely truncate a string to at most `max_bytes` bytes, ensuring we don't cut in the middle of a UTF-8 character.
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    // Find the largest valid UTF-8 character boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &s[..end]
+}
+
 /// Configuration for history compression.
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
@@ -230,7 +245,7 @@ impl CompressionStrategy {
                 ChatContent::ToolResult { tool_call_id, result } => {
                     format!("[Tool result {}: {}]", tool_call_id,
                         if result.len() > 100 {
-                            format!("{}...", &result[..100])
+                            format!("{}...", truncate_str(result, 100))
                         } else {
                             result.clone()
                         })

@@ -22,6 +22,9 @@ pub trait History {
     async fn append(&self, ctx: &crate::AgentContext<'_>, message: ChatMessage) -> Result<()>;
     async fn last(&self, ctx: &crate::AgentContext<'_>) -> Result<Option<ChatMessage>>;
 
+    /// Clears all messages from history.
+    async fn clear(&self, ctx: &crate::AgentContext<'_>) -> Result<()>;
+
     /// Returns the most recent `n` messages. If there are fewer than `n` messages,
     /// returns all messages. This is more efficient than get_all() for large histories.
     async fn get_recent(&self, ctx: &crate::AgentContext<'_>, n: usize) -> Result<Vec<ChatMessage>> {
@@ -43,6 +46,10 @@ impl<T: History + ?Sized> History for &T {
 
     async fn last(&self, ctx: &crate::AgentContext<'_>) -> Result<Option<ChatMessage>> {
         (**self).last(ctx).await
+    }
+
+    async fn clear(&self, ctx: &crate::AgentContext<'_>) -> Result<()> {
+        (**self).clear(ctx).await
     }
 
     async fn get_recent(&self, ctx: &crate::AgentContext<'_>, n: usize) -> Result<Vec<ChatMessage>> {
@@ -113,6 +120,11 @@ impl History for InMemoryHistory {
 
     async fn last(&self, _ctx: &crate::AgentContext<'_>) -> Result<Option<ChatMessage>> {
         Ok(self.messages.borrow().last().cloned())
+    }
+
+    async fn clear(&self, _ctx: &crate::AgentContext<'_>) -> Result<()> {
+        self.messages.borrow_mut().clear();
+        Ok(())
     }
 
     async fn get_recent(&self, _ctx: &crate::AgentContext<'_>, n: usize) -> Result<Vec<ChatMessage>> {

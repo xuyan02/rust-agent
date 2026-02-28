@@ -84,7 +84,7 @@ fn main() -> Result<()> {
             .build()?;
 
         let (tx, rx) = mpsc::channel();
-        let brain = Brain::new(session, Box::new(LlmAgent::new()), ChannelSink { tx })?;
+        let brain = Brain::new("brain-cli", session, Box::new(LlmAgent::new()), ChannelSink { tx })?;
 
         eprintln!("brain_cli ready. type and press enter; 'exit' to quit.");
 

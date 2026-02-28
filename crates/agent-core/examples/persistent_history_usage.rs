@@ -32,13 +32,12 @@ async fn main() -> anyhow::Result<()> {
     let store_rc = Rc::new(DataStore::new(data_store.root().to_path_buf()));
     let context_dir = store_rc.root_dir().subdir("example_context");
 
-    // 4. Create PersistentHistory (no node parameter needed)
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    // 4. Create PersistentHistory with dir_node
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(context_dir.clone()));
 
-    // 5. Create AgentContext with persistent history and dir_node
+    // 5. Create AgentContext with persistent history
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
-        .set_dir_node(context_dir.clone())
         .build()?;
 
     // 6. Use the context - messages are automatically persisted
@@ -61,12 +60,11 @@ async fn main() -> anyhow::Result<()> {
         context_dir.node("history").path().display()
     );
 
-    // 7. Verify persistence - create new context with same dir_node
-    let history2: Box<dyn History> = Box::new(PersistentHistory::new());
+    // 7. Verify persistence - create new history with same dir_node
+    let history2: Box<dyn History> = Box::new(PersistentHistory::new(context_dir));
 
     let ctx2 = AgentContextBuilder::from_session(&session)
         .set_history(history2)
-        .set_dir_node(context_dir)
         .build()?;
 
     let messages = ctx2.history().get_all(&ctx2).await?;

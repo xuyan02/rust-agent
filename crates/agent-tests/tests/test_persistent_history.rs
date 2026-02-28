@@ -23,10 +23,9 @@ async fn test_persistent_history_basic() -> anyhow::Result<()> {
     let store_rc = Rc::new(DataStore::new(data_store.root().to_path_buf()));
     let dir_node = store_rc.root_dir().subdir("test_context");
 
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
-        .set_dir_node(dir_node)
         .build()?;
 
     // Append messages
@@ -69,7 +68,7 @@ async fn test_persistent_history_persistence() -> anyhow::Result<()> {
 
     // Create first context and add messages
     {
-        let history: Box<dyn History> = Box::new(PersistentHistory::new());
+        let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
         let ctx = AgentContextBuilder::from_session(&session)
             .set_history(history)
             .set_dir_node(Rc::clone(&dir_node))
@@ -85,7 +84,7 @@ async fn test_persistent_history_persistence() -> anyhow::Result<()> {
 
     // Create second context and verify persistence
     {
-        let history: Box<dyn History> = Box::new(PersistentHistory::new());
+        let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
         let ctx = AgentContextBuilder::from_session(&session)
             .set_history(history)
             .set_dir_node(dir_node)
@@ -119,7 +118,7 @@ async fn test_persistent_history_get_recent() -> anyhow::Result<()> {
     let store_rc = Rc::new(DataStore::new(data_store.root().to_path_buf()));
     let dir_node = store_rc.root_dir().subdir("test_context");
 
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
         .set_dir_node(dir_node)
@@ -167,7 +166,7 @@ async fn test_persistent_history_subdirectory() -> anyhow::Result<()> {
     // Create history in a subdirectory
     let dir_node = store_rc.root_dir().subdir("context1");
 
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
         .set_dir_node(dir_node)

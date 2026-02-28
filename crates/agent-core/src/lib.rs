@@ -1,3 +1,22 @@
+/// Load a prompt from a markdown file at compile time and create a StaticSystemPromptSegment.
+///
+/// # Example
+/// ```ignore
+/// use agent_core::prompt;
+///
+/// // Returns StaticSystemPromptSegment
+/// let segment = prompt!("../prompts/my_prompt.md");
+///
+/// // Use in AgentContextBuilder
+/// builder.add_system_prompt_segment(Box::new(prompt!("../prompts/my_prompt.md")));
+/// ```
+#[macro_export]
+macro_rules! prompt {
+    ($path:expr) => {
+        $crate::StaticSystemPromptSegment::new(include_str!($path).to_string())
+    };
+}
+
 mod agent;
 mod agent_context;
 pub mod data_store;
@@ -20,7 +39,7 @@ pub use tools::{
 
 pub use agent::{Agent, LlmAgent};
 pub use agent_context::{AgentContext, AgentContextBuilder, AgentContextParent, make_user_message};
-pub use data_store::{DataNode, DataStore, DirNode, TypeInfo};
+pub use data_store::{DataNode, DataStore, DirNode};
 pub use history::{
     History, InMemoryHistory, PersistentHistory,
     estimate_tokens, estimate_message_tokens, estimate_messages_tokens,

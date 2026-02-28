@@ -11,7 +11,7 @@ struct ScriptedAgent {
 #[async_trait::async_trait(?Send)]
 impl Agent for ScriptedAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
-        let all = ctx.history().get_all().await?;
+        let all = ctx.history().get_all(ctx).await?;
         let last_user = all
             .iter()
             .rev()
@@ -31,7 +31,7 @@ impl Agent for ScriptedAgent {
         };
 
         ctx.history()
-            .append(agent_core::llm::ChatMessage {
+            .append(ctx, agent_core::llm::ChatMessage {
                 role: agent_core::llm::ChatRole::Assistant,
                 content: agent_core::llm::ChatContent::Text(format!("@{to}: echo:{content}")),
             })
@@ -143,7 +143,7 @@ fn bot_emits_error_on_invalid_brain_output() {
         impl Agent for BadAgent {
             async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
                 ctx.history()
-                    .append(agent_core::llm::ChatMessage {
+                    .append(ctx, agent_core::llm::ChatMessage {
                         role: agent_core::llm::ChatRole::Assistant,
                         content: agent_core::llm::ChatContent::Text("not-protocol".to_string()),
                     })

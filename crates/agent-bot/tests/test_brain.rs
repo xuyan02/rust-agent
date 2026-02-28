@@ -11,7 +11,7 @@ struct EchoAgent;
 #[async_trait::async_trait(?Send)]
 impl Agent for EchoAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
-        let all = ctx.history().get_all().await?;
+        let all = ctx.history().get_all(ctx).await?;
         let last_user = all.iter().rev().find(|m| m.role == ChatRole::User);
 
         let text = match last_user.map(|m| &m.content) {
@@ -20,7 +20,7 @@ impl Agent for EchoAgent {
         };
 
         ctx.history()
-            .append(ChatMessage {
+            .append(ctx, ChatMessage {
                 role: ChatRole::Assistant,
                 content: ChatContent::Text(format!("echo:{text}")),
             })
@@ -82,7 +82,7 @@ fn brain_outputs_in_order() {
             .unwrap();
 
         let (tx, rx) = mpsc::channel();
-        let brain = Brain::new(session, Box::new(EchoAgent), ChannelSink { tx }).unwrap();
+        let brain = Brain::new("test-brain", session, Box::new(EchoAgent), ChannelSink { tx }).unwrap();
 
         brain.push_input("a");
         brain.push_input("b");

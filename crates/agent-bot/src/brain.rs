@@ -2,6 +2,15 @@ use agent_core::{Agent, AgentContextBuilder, History, Session};
 use anyhow::{Context as _, Result};
 use std::{cell::RefCell, collections::VecDeque, marker::PhantomData, rc::Rc, time::Duration};
 
+/// Safely truncate a string to a maximum number of characters (not bytes)
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}...", s.chars().take(max_chars).collect::<String>())
+    }
+}
+
 pub enum BrainEvent {
     OutputText { text: String },
     Error { error: anyhow::Error },
@@ -41,6 +50,7 @@ impl BrainConfig {
 }
 
 pub struct Brain {
+    name: String,
     inner: Rc<RefCell<Inner>>,
     /// Notify the driver loop that new input is available.
     notify: Rc<tokio::sync::Notify>,
@@ -54,6 +64,7 @@ pub struct Brain {
 impl Clone for Brain {
     fn clone(&self) -> Self {
         Self {
+            name: self.name.clone(),
             inner: Rc::clone(&self.inner),
             notify: Rc::clone(&self.notify),
             _sink: Rc::clone(&self._sink),
@@ -64,9 +75,12 @@ impl Clone for Brain {
 
 impl Brain {
     pub fn push_input(&self, text: impl Into<String>) {
+        let text = text.into();
+        tracing::debug!("[Brain::{}] push_input: {}",
+            self.name, truncate_str(&text, 100));
         {
             let mut inner = self.inner.borrow_mut();
-            inner.inbox.push_back(text.into());
+            inner.inbox.push_back(text);
         }
         // Wake the driver loop so it picks up the new message immediately.
         self.notify.notify_one();
@@ -90,31 +104,23 @@ impl Drop for Brain {
 impl Brain {
     /// Creates a new Brain with default configuration.
     pub fn new(
+        name: impl Into<String>,
         session: Session,
         agent: Box<dyn Agent>,
         sink: impl BrainEventSink + 'static,
     ) -> Result<Self> {
-        Self::new_with_config(session, agent, sink, BrainConfig::default(), vec![])
-    }
-
-    /// Creates a new Brain with system prompts.
-    pub fn new_with_system_prompts(
-        session: Session,
-        agent: Box<dyn Agent>,
-        sink: impl BrainEventSink + 'static,
-        system_prompts: Vec<String>,
-    ) -> Result<Self> {
-        Self::new_with_config(session, agent, sink, BrainConfig::default(), system_prompts)
+        Self::new_with_config(name, session, agent, sink, BrainConfig::default())
     }
 
     /// Creates a new Brain with custom configuration.
     pub fn new_with_config(
+        name: impl Into<String>,
         session: Session,
         agent: Box<dyn Agent>,
         sink: impl BrainEventSink + 'static,
         config: BrainConfig,
-        system_prompts: Vec<String>,
     ) -> Result<Self> {
+        let name = name.into();
         let spawner = session
             .runtime()
             .local_spawner()
@@ -125,15 +131,16 @@ impl Brain {
         let notify = Rc::new(tokio::sync::Notify::new());
 
         let inner = Rc::new(RefCell::new(Inner {
+            name: name.clone(),
             agent: Some(agent),
             session: Rc::clone(&session_rc),
             inbox: VecDeque::new(),
             shutdown: false,
             config,
-            system_prompts,
         }));
 
         let handle = Brain {
+            name: name.clone(),
             inner: Rc::clone(&inner),
             notify: Rc::clone(&notify),
             _sink: Rc::clone(&sink_rc),
@@ -146,9 +153,10 @@ impl Brain {
     }
 }
 
-type WorkItem = (Rc<Session>, String, Box<dyn Agent>, Vec<String>);
+type WorkItem = (Rc<Session>, String, Box<dyn Agent>);
 
 struct Inner {
+    name: String,
     /// `Option` so we can `.take()` the agent across await points instead of
     /// swapping in a dummy placeholder.
     agent: Option<Box<dyn Agent>>,
@@ -156,7 +164,6 @@ struct Inner {
     inbox: VecDeque<String>,
     shutdown: bool,
     config: BrainConfig,
-    system_prompts: Vec<String>,
 }
 
 async fn driver_loop(
@@ -181,29 +188,30 @@ async fn driver_loop(
                 // Clone the Rc to get a safe reference we can use across await.
                 let session = Rc::clone(&inner.session);
                 let timeout = inner.config.request_timeout;
-                let system_prompts = inner.system_prompts.clone();
 
-                ((session, input, agent, system_prompts), timeout)
+                ((session, input, agent), timeout)
             })
         };
 
-        let Some(((session, input, agent, system_prompts), timeout)) = maybe_work else {
+        let Some(((session, input, agent), timeout)) = maybe_work else {
             // Efficiently wait for a notification instead of busy-looping.
             notify.notified().await;
             continue;
         };
 
+        tracing::debug!("[Brain] Processing input: {}", truncate_str(&input, 100));
+
         // Execute the request with timeout
         let res: Result<Option<String>> = match tokio::time::timeout(timeout, async {
-            let mut ctx_builder = AgentContextBuilder::from_session(&session);
-            for prompt in system_prompts {
-                ctx_builder = ctx_builder.add_system_segment(prompt);
-            }
-            let ctx = ctx_builder.build()?;
+            tracing::debug!("[Brain] Building context");
+            let ctx = AgentContextBuilder::from_session(&session).build()?;
 
-            History::append(ctx.history(), &ctx, agent_core::make_user_message(input)).await?;
+            tracing::debug!("[Brain] Appending user message to history");
+            History::append(ctx.history(), &ctx, agent_core::make_user_message(input.clone())).await?;
 
+            tracing::debug!("[Brain] Starting agent.run()");
             agent.run(&ctx).await?;
+            tracing::debug!("[Brain] agent.run() completed");
 
             let msgs = History::get_all(ctx.history(), &ctx).await?;
             let last_assistant = msgs.iter().rev().find_map(|m| {
@@ -216,7 +224,20 @@ async fn driver_loop(
                 }
             });
 
-            Ok(last_assistant.map(|s| s.to_string()))
+            // Strip ReAct prefixes ([think], [act], [answer]) from output for ReActAgent brains
+            // (Conversation Brain uses LlmAgent and doesn't have these prefixes)
+            Ok(last_assistant.map(|s| {
+                let trimmed = s.trim();
+                if let Some(content) = trimmed.strip_prefix("[answer]") {
+                    content.trim().to_string()
+                } else if let Some(content) = trimmed.strip_prefix("[think]") {
+                    content.trim().to_string()
+                } else if let Some(content) = trimmed.strip_prefix("[act]") {
+                    content.trim().to_string()
+                } else {
+                    s.to_string()
+                }
+            }))
         })
         .await
         {

@@ -137,6 +137,15 @@ cargo clippy
 cargo test
 ```
 
+## 文档
+
+更多设计与实现文档请参阅 [`docs/`](docs/README.md)，包含：
+
+- **架构设计** — Brain 架构、Introspection Brain、Memory Tool 等
+- **持久化** — 历史记录持久化、压缩、Goal/Memory 持久化等
+- **Team 功能** — 多 Bot 协作实现、CLI、工具管理等
+- **重构记录** — Brain 重构、统一配置、改进计划等
+
 ## License
 
 本项目采用双许可证：**MIT OR Apache-2.0**（见工作区 `Cargo.toml`）。

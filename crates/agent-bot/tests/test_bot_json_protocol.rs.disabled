@@ -19,7 +19,7 @@ struct TestAgent {
 impl Agent for TestAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
         ctx.history()
-            .append(agent_core::llm::ChatMessage::assistant_text(
+            .append(ctx, agent_core::llm::ChatMessage::assistant_text(
                 self.response.clone(),
             ))
             .await?;

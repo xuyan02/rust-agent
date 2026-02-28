@@ -30,7 +30,8 @@ async fn test_session_dir_node_inheritance() -> anyhow::Result<()> {
         .build()?;
 
     // Create context without setting dir_node - it will inherit from Session
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    let dir_node = session.dir_node().expect("session should have dir_node");
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
         .build()?;
@@ -80,10 +81,9 @@ async fn test_context_dir_node_overrides_session() -> anyhow::Result<()> {
 
     // Create context with its own dir_node - overrides Session's
     let context_dir = store_rc.root_dir().subdir("context_storage");
-    let history: Box<dyn History> = Box::new(PersistentHistory::new());
+    let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&context_dir)));
     let ctx = AgentContextBuilder::from_session(&session)
         .set_history(history)
-        .set_dir_node(context_dir)
         .build()?;
 
     ctx.history()
@@ -133,7 +133,8 @@ async fn test_multiple_contexts_share_session_dir_node() -> anyhow::Result<()> {
 
     // Create first context
     {
-        let history: Box<dyn History> = Box::new(PersistentHistory::new());
+        let dir_node = session.dir_node().expect("session should have dir_node");
+        let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
         let ctx1 = AgentContextBuilder::from_session(&session)
             .set_history(history)
             .build()?;
@@ -145,7 +146,8 @@ async fn test_multiple_contexts_share_session_dir_node() -> anyhow::Result<()> {
 
     // Create second context - will see first context's messages
     {
-        let history: Box<dyn History> = Box::new(PersistentHistory::new());
+        let dir_node = session.dir_node().expect("session should have dir_node");
+        let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
         let ctx2 = AgentContextBuilder::from_session(&session)
             .set_history(history)
             .build()?;
@@ -164,7 +166,8 @@ async fn test_multiple_contexts_share_session_dir_node() -> anyhow::Result<()> {
 
     // Create third context - sees both
     {
-        let history: Box<dyn History> = Box::new(PersistentHistory::new());
+        let dir_node = session.dir_node().expect("session should have dir_node");
+        let history: Box<dyn History> = Box::new(PersistentHistory::new(Rc::clone(&dir_node)));
         let ctx3 = AgentContextBuilder::from_session(&session)
             .set_history(history)
             .build()?;

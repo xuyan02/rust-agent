@@ -56,7 +56,7 @@ impl Runtime {
         }
 
         let model = ctx.session().default_model();
-        tracing::info!("[LlmAgent] Starting execution with model: {}", model);
+        tracing::debug!("[LlmAgent] Starting execution with model: {}", model);
         let mut iteration = 0;
 
         loop {
@@ -66,8 +66,9 @@ impl Runtime {
             let mut sender = self.create_sender(model)?;
 
             let tools = ctx.tools();
-            tracing::debug!("[LlmAgent] Sending request to LLM with {} tools", tools.len());
+            tracing::debug!("[Runtime] Sending LLM request (iteration {}, {} tools)", iteration, tools.len());
             let reply = sender.send(&messages, tools.as_slice()).await?;
+            tracing::debug!("[Runtime] LLM request completed (iteration {})", iteration);
 
             if reply.role != ChatRole::Assistant {
                 bail!("tool_loop: reply role is not assistant");
@@ -81,9 +82,9 @@ impl Runtime {
 
             match reply.content {
                 ChatContent::Text(ref text) => {
-                    tracing::info!("[LlmAgent] Received text response (length: {} chars)", text.len());
+                    tracing::debug!("[LlmAgent] Received text response (length: {} chars)", text.len());
                     tracing::debug!("[LlmAgent] Response: {}", text.chars().take(200).collect::<String>());
-                    tracing::info!("[LlmAgent] Execution completed");
+                    tracing::debug!("[LlmAgent] Execution completed");
                     return Ok(());
                 }
                 ChatContent::ToolCalls(tool_calls) => {
@@ -92,11 +93,11 @@ impl Runtime {
                         bail!("tool_loop: empty tool_calls");
                     }
 
-                    tracing::info!("[LlmAgent] Received {} tool call(s)", calls.len());
+                    tracing::debug!("[LlmAgent] Received {} tool call(s)", calls.len());
 
                     for c in calls {
-                        tracing::info!("[LlmAgent] Executing tool: {} with args: {}",
-                            c.function_name,
+                        tracing::info!("[Runtime] Executing tool: {}", c.function_name);
+                        tracing::debug!("[Runtime] Tool args: {}",
                             serde_json::to_string(&c.arguments).unwrap_or_else(|_| format!("{:?}", c.arguments))
                         );
 
@@ -109,7 +110,7 @@ impl Runtime {
 
                         let result = match tool.invoke(ctx, &c.function_name, &c.arguments).await {
                             Ok(v) => {
-                                tracing::info!("[LlmAgent] Tool '{}' succeeded (output length: {} chars)",
+                                tracing::info!("[Runtime] Tool '{}' completed ({} chars)",
                                     c.function_name, v.len());
                                 crate::agent::maybe_spool_tool_output(ctx, &c.function_name, v)
                                     .await?

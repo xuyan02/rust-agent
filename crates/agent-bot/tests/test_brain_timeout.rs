@@ -23,7 +23,7 @@ impl Agent for SlowAgent {
         tokio::time::sleep(self.delay).await;
 
         ctx.history()
-            .append(agent_core::llm::ChatMessage::assistant_text(
+            .append(ctx, agent_core::llm::ChatMessage::assistant_text(
                 self.response.clone(),
             ))
             .await?;
@@ -76,6 +76,7 @@ async fn brain_request_completes_within_timeout() {
             let config = BrainConfig::new().with_timeout(Duration::from_secs(1));
 
             let brain = Brain::new_with_config(
+                "test-brain",
                 session,
                 agent,
                 CollectSink {
@@ -131,6 +132,7 @@ async fn brain_request_times_out_when_too_slow() {
             let config = BrainConfig::new().with_timeout(Duration::from_millis(200));
 
             let brain = Brain::new_with_config(
+                "test-brain-slow",
                 session,
                 agent,
                 CollectSink {
@@ -190,6 +192,7 @@ async fn brain_uses_default_timeout() {
 
             // Use default config (5 minute timeout)
             let brain = Brain::new(
+                "test-brain-default",
                 session,
                 agent,
                 CollectSink {

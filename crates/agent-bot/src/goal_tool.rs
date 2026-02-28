@@ -1,37 +1,95 @@
 use agent_core::tools::{FunctionSpec, ObjectSpec, PropertySpec, StringSpec, Tool, ToolSpec, TypeSpec};
+use agent_core::{AgentContext, DataNode, SystemPromptSegment};
 use anyhow::Result;
-use std::cell::RefCell;
+use serde::{Deserialize, Serialize};
 use std::rc::Rc;
+
+/// Persistable goal data
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GoalData {
+    pub goal: Option<String>,
+}
 
 /// Shared goal state for the bot
 #[derive(Clone)]
 pub struct GoalState {
-    inner: Rc<RefCell<Option<String>>>,
+    node: Rc<DataNode>,
 }
 
 impl GoalState {
-    pub fn new() -> Self {
-        Self {
-            inner: Rc::new(RefCell::new(None)),
-        }
+    pub fn new(node: Rc<DataNode>) -> Self {
+        Self { node }
+    }
+
+    /// Load goal from disk (idempotent)
+    /// DataNode.load() automatically creates default if file doesn't exist
+    pub async fn load(&self) -> Result<()> {
+        self.node.load::<GoalData>().await
+    }
+
+    /// Flush goal to disk
+    pub async fn flush(&self) -> Result<()> {
+        self.node.flush().await
     }
 
     pub fn set(&self, goal: String) {
-        *self.inner.borrow_mut() = Some(goal);
+        // Get mutable reference to DataNode's cache
+        if let Ok(Some(mut data)) = self.node.get_mut::<GoalData>() {
+            data.goal = Some(goal);
+            // drop data, auto-marks dirty
+        }
     }
 
     pub fn get(&self) -> Option<String> {
-        self.inner.borrow().clone()
+        // Read from DataNode's cache
+        if let Ok(Some(data)) = self.node.get::<GoalData>() {
+            data.goal.clone()
+        } else {
+            None
+        }
     }
 
     pub fn clear(&self) {
-        *self.inner.borrow_mut() = None;
+        // Get mutable reference to DataNode's cache
+        if let Ok(Some(mut data)) = self.node.get_mut::<GoalData>() {
+            data.goal = None;
+            // drop data, auto-marks dirty
+        }
     }
 }
 
-impl Default for GoalState {
-    fn default() -> Self {
-        Self::new()
+/// Dynamic system prompt segment that renders the current goal
+pub struct GoalSegment {
+    goal_state: GoalState,
+}
+
+// GoalState is Rc<RefCell<...>> which is not Send, but GoalSegment
+// is only used in single-threaded context (Brain is !Send)
+unsafe impl Send for GoalSegment {}
+
+impl GoalSegment {
+    pub fn new(goal_state: GoalState) -> Self {
+        Self { goal_state }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl SystemPromptSegment for GoalSegment {
+    async fn render(&self, _ctx: &AgentContext<'_>) -> Result<String> {
+        // Load from disk on first access (idempotent)
+        self.goal_state.load().await?;
+
+        if let Some(goal) = self.goal_state.get() {
+            Ok(format!(
+                "═══════════════════════════════════════════════════════\n\
+                CURRENT GOAL:\n\
+                {}\n\
+                ═══════════════════════════════════════════════════════",
+                goal
+            ))
+        } else {
+            Ok(String::new())
+        }
     }
 }
 
@@ -94,6 +152,9 @@ impl Tool for GoalTool {
         function_name: &str,
         args: &serde_json::Value,
     ) -> Result<String> {
+        // Load from disk on first access (idempotent)
+        self.goal_state.load().await?;
+
         match function_name {
             "set-goal" => {
                 let goal = args
@@ -102,6 +163,8 @@ impl Tool for GoalTool {
                     .ok_or_else(|| anyhow::anyhow!("missing 'goal' argument"))?;
 
                 self.goal_state.set(goal.to_string());
+                // Flush immediately to persist changes
+                self.goal_state.flush().await?;
                 Ok(format!("Goal set: {}", goal))
             }
             "get-goal" => {
@@ -113,6 +176,8 @@ impl Tool for GoalTool {
             }
             "clear-goal" => {
                 self.goal_state.clear();
+                // Flush immediately to persist changes
+                self.goal_state.flush().await?;
                 Ok("Goal cleared.".to_string())
             }
             _ => anyhow::bail!("unknown function: {}", function_name),

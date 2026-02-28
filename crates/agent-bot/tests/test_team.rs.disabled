@@ -19,12 +19,12 @@ struct EchoAgent {
 #[async_trait::async_trait(?Send)]
 impl Agent for EchoAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
-        let msgs = ctx.history().get_all().await?;
+        let msgs = ctx.history().get_all(ctx).await?;
         if let Some(last_msg) = msgs.last() {
             if let agent_core::llm::ChatContent::Text(text) = &last_msg.content {
                 let response = format!("{}: {}", self.prefix, text);
                 ctx.history()
-                    .append(agent_core::llm::ChatMessage::assistant_text(response))
+                    .append(ctx, agent_core::llm::ChatMessage::assistant_text(response))
                     .await?;
             }
         }
@@ -47,7 +47,7 @@ impl Agent for RouterAgent {
                 "content": content
             });
             ctx.history()
-                .append(agent_core::llm::ChatMessage::assistant_text(
+                .append(ctx, agent_core::llm::ChatMessage::assistant_text(
                     json_msg.to_string(),
                 ))
                 .await?;

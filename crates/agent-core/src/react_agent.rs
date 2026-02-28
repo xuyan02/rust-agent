@@ -33,7 +33,7 @@ impl ReActAgent {
 
     fn log(&self, msg: &str) {
         if self.enable_logging {
-            tracing::info!("[ReAct] {}", msg);
+            tracing::debug!("[ReAct] {}", msg);
         }
     }
 }
@@ -58,24 +58,42 @@ enum ThinkDecision {
 #[async_trait(?Send)]
 impl Agent for ReActAgent {
     async fn run(&self, ctx: &AgentContext<'_>) -> Result<()> {
+        // Wrap entire execution in error handler to clear history on any error
+        match self.run_impl(ctx).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // On any error, clear history to prevent getting stuck in a bad state
+                tracing::error!("[ReAct] Error occurred: {}. Clearing history.", e);
+                if let Err(clear_err) = ctx.history().clear(ctx).await {
+                    tracing::error!("[ReAct] Failed to clear history: {}", clear_err);
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+impl ReActAgent {
+    async fn run_impl(&self, ctx: &AgentContext<'_>) -> Result<()> {
         let mut iteration = 0;
 
         loop {
             iteration += 1;
             self.log(&format!("========== Iteration {} ==========", iteration));
+            tracing::info!("[ReAct] Iteration {}", iteration);
 
             // === Phase 1: Think ===
             self.log("--- THINK Phase ---");
+            tracing::info!("[ReAct] Starting THINK phase");
             let think_result = self.run_think_phase(ctx).await?;
+            tracing::info!("[ReAct] THINK phase completed");
 
             match think_result {
                 ThinkDecision::ContinueThinking { thought } => {
                     self.log(&format!("Decision: [think]\n{}", thought));
 
-                    // Append to history
-                    ctx.history()
-                        .append(ctx, ChatMessage::assistant_text(thought))
-                        .await?;
+                    // Note: assistant's thought is already appended to history by runtime.execute()
+                    // We only need to add the user prompt to continue
 
                     // Add a user message to continue the conversation
                     // (required because some models don't support ending with assistant message)
@@ -89,10 +107,8 @@ impl Agent for ReActAgent {
                 ThinkDecision::ReadyToAct { thought } => {
                     self.log(&format!("Decision: [act]\n{}", thought));
 
-                    // Append to history
-                    ctx.history()
-                        .append(ctx, ChatMessage::assistant_text(thought))
-                        .await?;
+                    // Note: assistant's thought is already appended to history by runtime.execute()
+                    // We only need to add the user prompt before Act phase
 
                     // Add a user message before Act phase
                     // (required because some models don't support ending with assistant message)
@@ -105,10 +121,7 @@ impl Agent for ReActAgent {
                 ThinkDecision::FinalAnswer { answer } => {
                     self.log(&format!("Decision: [answer]\n{}", answer));
 
-                    // Append final answer
-                    ctx.history()
-                        .append(ctx, ChatMessage::assistant_text(answer))
-                        .await?;
+                    // Note: assistant's final answer is already appended to history by runtime.execute()
 
                     self.log("========== Task Completed ==========");
                     return Ok(());
@@ -117,7 +130,9 @@ impl Agent for ReActAgent {
 
             // === Phase 2: Act ===
             self.log("--- ACT Phase ---");
+            tracing::info!("[ReAct] Starting ACT phase");
             let observation = self.run_act_phase(ctx).await?;
+            tracing::info!("[ReAct] ACT phase completed");
 
             self.log(&format!("Observation:\n{}", observation));
 
@@ -134,104 +149,118 @@ impl Agent for ReActAgent {
 impl ReActAgent {
     /// Run Think phase: analyze situation and decide next step
     async fn run_think_phase(&self, ctx: &AgentContext<'_>) -> Result<ThinkDecision> {
+        tracing::info!("[ReAct::Think] Building prompt");
         let think_prompt = self.build_think_prompt();
 
+        tracing::info!("[ReAct::Think] Building context");
         let think_ctx = AgentContextBuilder::from_parent_ctx(ctx)
             .add_system_prompt_segment(Box::new(StaticSystemPromptSegment::new(think_prompt)))
             .disable_tools()  // Think phase should not use tools
             .build()?;
 
         // Run LLM without tools (pure reasoning)
+        tracing::info!("[ReAct::Think] Calling LLM");
         let think_agent = LlmAgent::new();
         think_agent.run(&think_ctx).await?;
+        tracing::info!("[ReAct::Think] LLM call completed");
 
         // Extract thought
+        tracing::info!("[ReAct::Think] Extracting output");
         let output = self.extract_last_assistant_text(&think_ctx).await?;
 
         // Log the complete think output
         self.log(&format!("Think output:\n{}", output));
 
         // Parse prefix to determine decision
+        tracing::info!("[ReAct::Think] Parsing decision");
         self.parse_think_decision(&output)
     }
 
     fn build_think_prompt(&self) -> String {
-        r#"You are in the THINK phase of the ReAct (Reasoning and Acting) framework.
-
-Your task is to analyze the current situation and decide what to do next.
-
-Review:
-1. The user's original question
-2. All previous thoughts and observations
-3. What information you currently have
-4. What information is still missing
-
-CRITICAL: You MUST start your response with EXACTLY ONE prefix:
-
-[think] - If you need more time to analyze before taking action
-[act] - If you're ready to take an action (use a tool)
-[answer] - If you have enough information to provide the final answer
-
-Examples:
-
-[think] I need to understand the problem better. Let me analyze...
-
-[act] I will search for files using file-glob to find all Rust files.
-
-[answer] Based on the observations, the answer is: ...
-
-STRICT RULES:
-- Use ONLY ONE prefix per response
-- The prefix MUST be at the very start (first line)
-- NEVER use multiple prefixes in the same response
-- NEVER output [think] followed by [act] or [answer]
-- Choose [think] if you're uncertain or need to reason more
-- Choose [act] when you have a clear action to take
-- Choose [answer] when you're ready to provide the final answer to the user"#
-            .to_string()
+        include_str!("../prompts/react_think.md").to_string()
     }
 
     fn parse_think_decision(&self, output: &str) -> Result<ThinkDecision> {
         let trimmed = output.trim();
 
-        // Count how many decision markers appear in the output
-        let think_count = trimmed.matches("[think]").count();
-        let act_count = trimmed.matches("[act]").count();
-        let answer_count = trimmed.matches("[answer]").count();
-        let total_markers = think_count + act_count + answer_count;
+        // Special case: empty output indicates LLM failure, need to clear history
+        if trimmed.is_empty() {
+            bail!("Think phase returned empty output (likely due to unstable LLM response). History will be cleared.");
+        }
 
-        // Validate: exactly one marker allowed
-        if total_markers == 0 {
+        // Check which marker appears at the start
+        let starts_with_think = trimmed.starts_with("[think]");
+        let starts_with_act = trimmed.starts_with("[act]");
+        let starts_with_answer = trimmed.starts_with("[answer]");
+
+        // Validate: exactly one marker at the start
+        let marker_count = [starts_with_think, starts_with_act, starts_with_answer]
+            .iter()
+            .filter(|&&x| x)
+            .count();
+
+        if marker_count == 0 {
             bail!(
-                "Think phase output must start with [think], [act], or [answer]. Got: {}",
-                trimmed.chars().take(50).collect::<String>()
+                "Think phase output missing marker (likely due to unstable LLM response). History will be cleared. Got: {}",
+                trimmed.chars().take(100).collect::<String>()
             );
         }
 
-        if total_markers > 1 {
+        if marker_count > 1 {
             bail!(
-                "Think phase output must contain ONLY ONE decision marker. Found: [think]={}, [act]={}, [answer]={}. Output: {}",
-                think_count,
-                act_count,
-                answer_count,
+                "Think phase output starts with multiple markers (should not happen). Got: {}",
                 trimmed.chars().take(100).collect::<String>()
             );
         }
 
         // Parse the single marker
         if let Some(content) = trimmed.strip_prefix("[think]") {
+            // Validate: check if other markers appear at the START of lines in content
+            // (Allow mentioning markers in discussion, but forbid actual decision markers)
+            let content_lines: Vec<&str> = content.lines().collect();
+            for line in &content_lines {
+                let line_trimmed = line.trim_start();
+                if line_trimmed.starts_with("[act]") || line_trimmed.starts_with("[answer]") {
+                    bail!(
+                        "Think phase output contains multiple decision markers. Use ONLY ONE marker. Got: {}",
+                        trimmed.chars().take(200).collect::<String>()
+                    );
+                }
+            }
             return Ok(ThinkDecision::ContinueThinking {
                 thought: format!("[think]{}", content),
             });
         }
 
         if let Some(content) = trimmed.strip_prefix("[act]") {
+            // Validate: check if other markers appear at the START of lines in content
+            let content_lines: Vec<&str> = content.lines().collect();
+            for line in &content_lines {
+                let line_trimmed = line.trim_start();
+                if line_trimmed.starts_with("[think]") || line_trimmed.starts_with("[answer]") {
+                    bail!(
+                        "Think phase output contains multiple decision markers. Use ONLY ONE marker. Got: {}",
+                        trimmed.chars().take(200).collect::<String>()
+                    );
+                }
+            }
             return Ok(ThinkDecision::ReadyToAct {
                 thought: format!("[act]{}", content),
             });
         }
 
         if let Some(content) = trimmed.strip_prefix("[answer]") {
+            // Validate: check if other markers appear at the START of lines in content
+            let content_lines: Vec<&str> = content.lines().collect();
+            for line in &content_lines {
+                let line_trimmed = line.trim_start();
+                if line_trimmed.starts_with("[think]") || line_trimmed.starts_with("[act]") {
+                    bail!(
+                        "Think phase output contains multiple decision markers. Use ONLY ONE marker. Got: {}",
+                        trimmed.chars().take(200).collect::<String>()
+                    );
+                }
+            }
             return Ok(ThinkDecision::FinalAnswer {
                 answer: content.trim().to_string(),
             });
@@ -249,17 +278,22 @@ STRICT RULES:
     /// in sequence if needed. The Act phase completes when LLM returns text
     /// (not tool calls), at which point we return the text as observation.
     async fn run_act_phase(&self, ctx: &AgentContext<'_>) -> Result<String> {
+        tracing::info!("[ReAct::Act] Building prompt");
         let act_prompt = self.build_act_prompt();
 
+        tracing::info!("[ReAct::Act] Building context");
         let act_ctx = AgentContextBuilder::from_parent_ctx(ctx)
             .add_system_prompt_segment(Box::new(StaticSystemPromptSegment::new(act_prompt)))
             .build()?;
 
         // Run LLM with tools - allows multiple tool calls
+        tracing::info!("[ReAct::Act] Calling LLM (with tools enabled)");
         let act_agent = LlmAgent::new();
         act_agent.run(&act_ctx).await?;
+        tracing::info!("[ReAct::Act] LLM call completed");
 
         // Extract the final text output as observation
+        tracing::info!("[ReAct::Act] Extracting output");
         let observation = self.extract_last_assistant_text(&act_ctx).await?;
 
         self.log(&format!("Act output:\n{}", observation));
@@ -268,25 +302,7 @@ STRICT RULES:
     }
 
     fn build_act_prompt(&self) -> String {
-        r#"You are in the ACT phase of the ReAct framework.
-
-Based on your previous thinking, now execute the planned action.
-
-You can:
-- Use tools to gather information or perform actions
-- Call multiple tools in sequence if needed for this action
-- When you're done with the action, summarize what you accomplished
-
-After you finish using tools, provide a brief summary of what you did and what you learned.
-This summary will be provided as "Observation" to the next THINK phase.
-
-Example:
-[Calls file-glob tool]
-[Calls file-read tool]
-"I searched for Rust files and found 10 files. I read the first file which contains..."
-
-The observation will help you analyze the results in the next thinking phase."#
-            .to_string()
+        include_str!("../prompts/react_act.md").to_string()
     }
 
     async fn extract_last_assistant_text(&self, ctx: &AgentContext<'_>) -> Result<String> {
@@ -330,41 +346,67 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_think_decision_multiple_markers_error() {
+    fn test_parse_think_decision_marker_in_content_ok() {
         let agent = ReActAgent::new();
 
-        // Invalid: multiple markers
-        let result = agent.parse_think_decision("[think] Let me think... [act] Now I will act.");
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("ONLY ONE decision marker"));
+        // Valid: marker at start, mentions other markers in discussion (not at line start)
+        let result = agent.parse_think_decision("[think] I'm considering using [act] later.");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), ThinkDecision::ContinueThinking { .. }));
 
-        // Invalid: multiple same markers
-        let result = agent.parse_think_decision("[think] First thought [think] Second thought");
+        // Valid: marker at start, tool call JSON may contain marker strings
+        let result = agent.parse_think_decision("[act] I will use tool.\n<tool_call>{\"desc\": \"[act] marker\"}");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), ThinkDecision::ReadyToAct { .. }));
+    }
+
+    #[test]
+    fn test_parse_think_decision_rejects_multiple_markers() {
+        let agent = ReActAgent::new();
+
+        // Invalid: marker at start, followed by another marker at line start
+        let result = agent.parse_think_decision("[think] Let me analyze.\n[act] I will use tools.");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("ONLY ONE decision marker"));
+        assert!(err_msg.contains("multiple"));
+
+        // Invalid: consecutive markers
+        let result = agent.parse_think_decision("[think] Thinking...\n\n[answer] Here's the answer.");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("multiple"));
     }
 
     #[test]
     fn test_parse_think_decision_no_marker_error() {
         let agent = ReActAgent::new();
 
-        // Invalid: no marker
+        // No marker: should error (will trigger history clear)
         let result = agent.parse_think_decision("I forgot to add a marker.");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("must start with"));
+        assert!(err_msg.contains("missing marker") || err_msg.contains("History will be cleared"));
     }
 
     #[test]
-    fn test_parse_think_decision_marker_not_at_start() {
+    fn test_parse_think_decision_marker_not_at_start_error() {
         let agent = ReActAgent::new();
 
-        // Invalid: marker not at start
+        // Marker not at start: should error (will trigger history clear)
         let result = agent.parse_think_decision("Let me think... [think] Now analyzing.");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("must START with"));
+        assert!(err_msg.contains("missing marker") || err_msg.contains("History will be cleared"));
+    }
+
+    #[test]
+    fn test_parse_think_decision_empty_output_error() {
+        let agent = ReActAgent::new();
+
+        // Empty output: should error (will trigger history clear)
+        let result = agent.parse_think_decision("");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("empty") || err_msg.contains("History will be cleared"));
     }
 }

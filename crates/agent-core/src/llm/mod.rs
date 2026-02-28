@@ -146,13 +146,18 @@ impl LlmSender for OpenAiSender {
             self.base_url.trim_end_matches('/')
         );
 
+        tracing::debug!("[LLM] Preparing request: url={}, model={}, messages={}, tools={}",
+            url, self.model, messages.len(), tools.len());
+
         let tools_json = crate::llm::tools_to_openai_json(tools);
         let body = crate::llm::build_chat_completions_body(&self.model, messages, &tools_json)?;
+        tracing::debug!("[LLM] Request body built successfully");
 
         if debug_llm {
             eprintln!("[LLM][request][body] {}", crate::llm::json::dump(&body)?);
         }
 
+        tracing::debug!("[LLM] Building HTTP headers...");
         let mut headers = HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
@@ -165,35 +170,48 @@ impl LlmSender for OpenAiSender {
 
         if let Some(v) = &self.model_provider_id {
             headers.insert("X-Model-Provider-Id", HeaderValue::from_str(v)?);
+            tracing::debug!("[LLM] Added X-Model-Provider-Id header");
         }
+        tracing::debug!("[LLM] Headers prepared");
 
         // Retry with exponential backoff for rate limit errors
         let max_retries = 5;
         let mut retry_count = 0;
 
         loop {
+            let body_bytes = Bytes::from(crate::llm::json::dump(&body)?);
+            tracing::info!("[LLM] Sending request to {} (model: {}, {} bytes)", url, self.model, body_bytes.len());
+
             let resp = self
                 .http
                 .post(&url)
                 .headers(headers.clone())
-                .body(Bytes::from(crate::llm::json::dump(&body)?))
+                .body(body_bytes)
                 .send()
                 .await
                 .with_context(|| "openai: http request failed")?;
 
+            tracing::info!("[LLM] Response received (status: {})", resp.status());
             let status = resp.status().as_u16();
+
+            tracing::debug!("[LLM] Reading response body...");
             let response_body = resp
                 .bytes()
                 .await
                 .with_context(|| "openai: failed to read response body")?;
+            tracing::debug!("[LLM] Response body received ({} bytes)", response_body.len());
 
             // Success case
             if (200..300).contains(&status) {
+                tracing::debug!("[LLM] Parsing response JSON...");
                 let v = crate::llm::json::parse(
                     std::str::from_utf8(&response_body).context("openai: response is not utf-8")?,
                 )
                 .context("openai: failed to parse response JSON")?;
+
+                tracing::debug!("[LLM] Extracting chat completion...");
                 let reply = crate::llm::parse_chat_completions_response(&v)?;
+                tracing::debug!("[LLM] Successfully parsed response");
 
                 if debug_llm {
                     eprintln!("[LLM][response] provider=openai model={}", self.model);

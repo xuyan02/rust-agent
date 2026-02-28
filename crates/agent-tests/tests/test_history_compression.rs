@@ -36,11 +36,11 @@ async fn test_persistent_history_with_compression() -> anyhow::Result<()> {
     // Create session with dir_node
     let session = agent_core::SessionBuilder::new(runtime)
         .set_default_model("test-model".to_string())
-        .set_dir_node(dir_node)
+        .set_dir_node(Rc::clone(&dir_node))
         .build()?;
 
     // Create history with normal configuration
-    let history = Box::new(PersistentHistory::new());
+    let history = Box::new(PersistentHistory::new(dir_node));
 
     // Build context
     let ctx = agent_core::AgentContextBuilder::from_session(&session)

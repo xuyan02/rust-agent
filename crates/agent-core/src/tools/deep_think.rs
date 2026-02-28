@@ -3,6 +3,21 @@ use crate::{Agent, AgentContext, AgentContextBuilder, InMemoryHistory, ReActAgen
 use anyhow::Result;
 use async_trait::async_trait;
 
+/// Safely truncate a string to at most `max_bytes` bytes, ensuring we don't cut in the middle of a UTF-8 character.
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    // Find the largest valid UTF-8 character boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &s[..end]
+}
+
 /// DeepThinkTool - Delegates complex reasoning to a ReActAgent
 ///
 /// This tool allows a simple LLM agent to delegate complex tasks
@@ -74,7 +89,7 @@ impl Tool for DeepThinkTool {
                     .await?;
 
                 // Create and run ReActAgent
-                tracing::info!("[DeepThink] Starting deep reasoning for task");
+                tracing::debug!("[DeepThink] Starting deep reasoning for task");
                 let react_agent = ReActAgent::new().with_logging(true);
 
                 // Run with better error handling
@@ -86,7 +101,7 @@ impl Tool for DeepThinkTool {
                     ));
                 }
 
-                tracing::info!("[DeepThink] Completed successfully");
+                tracing::debug!("[DeepThink] Completed successfully");
 
                 // Extract the final answer from the isolated history
                 let messages = deep_ctx.history().get_all(&deep_ctx).await?;
@@ -105,10 +120,10 @@ impl Tool for DeepThinkTool {
                             text.clone()
                         };
 
-                        tracing::info!("[DeepThink] Final answer (length: {} chars):\n{}",
+                        tracing::debug!("[DeepThink] Final answer (length: {} chars):\n{}",
                             answer.len(),
                             if answer.len() > 500 {
-                                format!("{}...", &answer[..500])
+                                format!("{}...", truncate_str(&answer, 500))
                             } else {
                                 answer.clone()
                             });

@@ -1,31 +1,25 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// Trait for types that can provide a type tag for runtime type checking.
-pub trait TypeInfo {
-    fn type_tag() -> &'static str;
-}
-
 /// Type-erased cached value trait for internal storage.
 trait CachedValue: Any {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn to_yaml(&self) -> Result<serde_yaml::Value>;
-    fn type_tag(&self) -> &str;
+    fn to_yaml(&self) -> Result<String>;
 }
 
 /// Concrete typed cache wrapper.
-struct TypedCache<T: Serialize + TypeInfo + 'static> {
+struct TypedCache<T: Serialize + 'static> {
     value: T,
 }
 
-impl<T: Serialize + TypeInfo + 'static> CachedValue for TypedCache<T> {
+impl<T: Serialize + 'static> CachedValue for TypedCache<T> {
     fn as_any(&self) -> &dyn Any {
         &self.value
     }
@@ -34,20 +28,9 @@ impl<T: Serialize + TypeInfo + 'static> CachedValue for TypedCache<T> {
         &mut self.value
     }
 
-    fn to_yaml(&self) -> Result<serde_yaml::Value> {
-        Ok(serde_yaml::to_value(&self.value)?)
+    fn to_yaml(&self) -> Result<String> {
+        Ok(serde_yaml::to_string(&self.value)?)
     }
-
-    fn type_tag(&self) -> &str {
-        T::type_tag()
-    }
-}
-
-/// Storage format with type tag for runtime verification.
-#[derive(Serialize, Deserialize)]
-struct StoredData {
-    type_tag: String,
-    value: serde_yaml::Value,
 }
 
 /// A data node corresponding to a single `.yaml` file on disk.
@@ -76,28 +59,24 @@ impl DataNode {
 
     /// Asynchronously load data from disk into cache.
     ///
-    /// If the node is already loaded with the correct type, this is a no-op.
-    /// If loaded with a different type, returns an error.
+    /// If the node is already loaded, this is a no-op.
+    /// If the file doesn't exist, creates a default value in cache (not written to disk yet).
     pub async fn load<T>(&self) -> Result<()>
     where
-        T: DeserializeOwned + TypeInfo + Serialize + 'static,
+        T: DeserializeOwned + Serialize + Default + 'static,
     {
-        // Check if already loaded with correct type
+        // Check if already loaded
         let cache = self.cache.borrow();
-        if let Some(ref cached) = *cache {
-            if cached.type_tag() != T::type_tag() {
-                bail!(
-                    "type mismatch: node already loaded as {}, cannot load as {}",
-                    cached.type_tag(),
-                    T::type_tag()
-                );
-            }
+        if cache.is_some() {
             return Ok(());
         }
         drop(cache);
 
-        // Load from disk if file exists
+        // Load from disk if file exists, otherwise create default
         if !self.path.exists() {
+            // File doesn't exist, initialize cache with default value
+            let value = T::default();
+            *self.cache.borrow_mut() = Some(Box::new(TypedCache { value }));
             return Ok(());
         }
 
@@ -105,19 +84,8 @@ impl DataNode {
             .await
             .with_context(|| format!("failed to read {}", self.path.display()))?;
 
-        let stored: StoredData = serde_yaml::from_str(&contents)
+        let value: T = serde_yaml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", self.path.display()))?;
-
-        if stored.type_tag != T::type_tag() {
-            bail!(
-                "type mismatch on disk: expected {}, found {}",
-                T::type_tag(),
-                stored.type_tag
-            );
-        }
-
-        let value: T = serde_yaml::from_value(stored.value)
-            .with_context(|| format!("failed to deserialize node: {}", self.path.display()))?;
 
         *self.cache.borrow_mut() = Some(Box::new(TypedCache { value }));
         Ok(())
@@ -126,23 +94,13 @@ impl DataNode {
     /// Get a read-only reference to the cached data.
     ///
     /// Returns `None` if the node has not been loaded or set.
-    /// Returns an error if the node is loaded with a different type.
     pub fn get<T>(&self) -> Result<Option<Ref<'_, T>>>
     where
-        T: TypeInfo + 'static,
+        T: 'static,
     {
         let borrow = self.cache.borrow();
         if borrow.is_none() {
             return Ok(None);
-        }
-
-        let cached = borrow.as_ref().unwrap();
-        if cached.type_tag() != T::type_tag() {
-            bail!(
-                "type mismatch: node contains {}, requested {}",
-                cached.type_tag(),
-                T::type_tag()
-            );
         }
 
         Ok(Some(Ref::map(borrow, |opt| {
@@ -158,23 +116,13 @@ impl DataNode {
     ///
     /// Marks the node as dirty. Call `flush()` to persist changes.
     /// Returns `None` if the node has not been loaded or set.
-    /// Returns an error if the node is loaded with a different type.
     pub fn get_mut<T>(&self) -> Result<Option<RefMut<'_, T>>>
     where
-        T: TypeInfo + 'static,
+        T: 'static,
     {
         let borrow = self.cache.borrow_mut();
         if borrow.is_none() {
             return Ok(None);
-        }
-
-        let cached = borrow.as_ref().unwrap();
-        if cached.type_tag() != T::type_tag() {
-            bail!(
-                "type mismatch: node contains {}, requested {}",
-                cached.type_tag(),
-                T::type_tag()
-            );
         }
 
         self.dirty.set(true);
@@ -192,7 +140,7 @@ impl DataNode {
     /// Marks the node as dirty. Call `flush()` to persist to disk.
     pub fn set<T>(&self, value: T) -> Result<()>
     where
-        T: Serialize + TypeInfo + 'static,
+        T: Serialize + 'static,
     {
         *self.cache.borrow_mut() = Some(Box::new(TypedCache { value }));
         self.dirty.set(true);
@@ -204,7 +152,7 @@ impl DataNode {
     /// Marks the node as dirty since mutable access implies potential modification.
     pub fn get_or_default<T>(&self) -> Result<RefMut<'_, T>>
     where
-        T: DeserializeOwned + TypeInfo + Serialize + Default + 'static,
+        T: DeserializeOwned + Serialize + Default + 'static,
     {
         if self.cache.borrow().is_none() {
             *self.cache.borrow_mut() = Some(Box::new(TypedCache {
@@ -212,20 +160,11 @@ impl DataNode {
             }));
         }
 
-        let borrow = self.cache.borrow_mut();
-        let cached = borrow.as_ref().unwrap();
-        if cached.type_tag() != T::type_tag() {
-            bail!(
-                "type mismatch: node contains {}, requested {}",
-                cached.type_tag(),
-                T::type_tag()
-            );
-        }
-
         // Always mark as dirty when returning mutable reference
         // Since the caller has mutable access, we assume they will modify it
         self.dirty.set(true);
 
+        let borrow = self.cache.borrow_mut();
         Ok(RefMut::map(borrow, |opt| {
             opt.as_mut()
                 .unwrap()
@@ -246,10 +185,7 @@ impl DataNode {
             return Ok(());
         };
 
-        let stored = StoredData {
-            type_tag: cached.type_tag().to_string(),
-            value: cached.to_yaml()?,
-        };
+        let yaml_str = cached.to_yaml()?;
 
         // Ensure parent directories exist
         if let Some(parent) = self.path.parent() {
@@ -257,9 +193,6 @@ impl DataNode {
                 .await
                 .with_context(|| format!("failed to create dir {}", parent.display()))?;
         }
-
-        let yaml_str = serde_yaml::to_string(&stored)
-            .with_context(|| "failed to serialize to yaml")?;
 
         tokio::fs::write(&self.path, yaml_str)
             .await
