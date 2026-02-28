@@ -1,20 +1,25 @@
 use crate::llm::ChatMessage;
+use std::sync::OnceLock;
+use tiktoken_rs::CoreBPE;
 
-/// Estimate the number of tokens in a text string.
-/// Uses heuristic: ~4 chars/token for ASCII, ~1.5 chars/token for CJK.
+/// Global tokenizer instance (cl100k_base encoding used by GPT-4, GPT-3.5-turbo, and as approximation for Claude)
+static TOKENIZER: OnceLock<CoreBPE> = OnceLock::new();
+
+fn get_tokenizer() -> &'static CoreBPE {
+    TOKENIZER.get_or_init(|| {
+        tiktoken_rs::cl100k_base().expect("Failed to initialize tiktoken cl100k_base")
+    })
+}
+
+/// Estimate the number of tokens in a text string using tiktoken.
+/// Uses cl100k_base encoding (GPT-4, GPT-3.5-turbo).
 pub fn estimate_tokens(text: &str) -> usize {
     if text.is_empty() {
         return 0;
     }
 
-    let char_count = text.chars().count();
-    let ascii_count = text.chars().filter(|c| c.is_ascii()).count();
-    let ascii_ratio = ascii_count as f64 / char_count as f64;
-
-    // Weighted estimation: ASCII=4 chars/token, CJK=1.5 chars/token
-    let estimated = (ascii_ratio * char_count as f64 / 4.0)
-                  + ((1.0 - ascii_ratio) * char_count as f64 / 1.5);
-    estimated.ceil() as usize
+    let tokenizer = get_tokenizer();
+    tokenizer.encode_with_special_tokens(text).len()
 }
 
 /// Estimate total tokens for a message.
@@ -41,14 +46,27 @@ mod tests {
 
     #[test]
     fn test_estimate_tokens() {
+        // Empty string
         assert_eq!(estimate_tokens(""), 0);
 
+        // ASCII text - "Hello world" is 2 tokens in cl100k_base
         let ascii = "Hello world";
         let tokens = estimate_tokens(ascii);
-        assert!(tokens > 0 && tokens < ascii.len());
+        assert_eq!(tokens, 2, "Hello world should be 2 tokens");
 
+        // CJK text - "你好世界" is 5 tokens in cl100k_base
         let cjk = "你好世界";
         let tokens = estimate_tokens(cjk);
-        assert!(tokens > 0);
+        assert_eq!(tokens, 5, "你好世界 should be 5 tokens");
+
+        // Mixed text - "Hello 世界" is 5 tokens in cl100k_base
+        let mixed = "Hello 世界";
+        let tokens = estimate_tokens(mixed);
+        assert_eq!(tokens, 5, "Hello 世界 should be 5 tokens");
+
+        // Code snippet
+        let code = "fn main() { println!(\"Hello\"); }";
+        let tokens = estimate_tokens(code);
+        assert_eq!(tokens, 9, "Code snippet should be 9 tokens");
     }
 }

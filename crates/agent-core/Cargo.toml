@@ -17,6 +17,7 @@ tracing.workspace = true
 glob.workspace = true
 async-trait = "0.1"
 chrono = "0.4"
+tiktoken-rs = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
