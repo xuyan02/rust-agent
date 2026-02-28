@@ -97,8 +97,10 @@ async fn test_memory_segment_rendering() {
 
     // Render with memories
     let rendered = segment.render(&ctx).await.unwrap();
-    assert!(rendered.contains("MEMORY:"));
+    assert!(rendered.contains("## Memory"));
     assert!(rendered.contains("1. User likes vim keybindings"));
     assert!(rendered.contains("2. Project uses tokio runtime"));
-    assert!(rendered.contains("═══"));
+    assert!(rendered.contains("---"));
+    assert!(rendered.contains("Total:"));
+    assert!(rendered.contains("tokens"));
 }

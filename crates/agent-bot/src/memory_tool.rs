@@ -95,15 +95,16 @@ impl SystemPromptSegment for MemorySegment {
             let token_count = self.memory_state.count_tokens();
             let memory_count = memories.len();
 
-            let mut result = String::from(
-                "═══════════════════════════════════════════════════════\n\
-                MEMORY:\n"
-            );
-            result.push_str(&format!("(Total: {} memories, {} tokens)\n\n", memory_count, token_count));
+            let mut result = String::from("\n---\n\n## Memory\n\n");
+            result.push_str("The following are important facts recorded during our conversation:\n\n");
+            result.push_str(&format!("**Total: {} memories, {} tokens**\n\n", memory_count, token_count));
+
             for (i, memory) in memories.iter().enumerate() {
                 result.push_str(&format!("{}. {}\n", i + 1, memory));
             }
-            result.push_str("═══════════════════════════════════════════════════════");
+
+            result.push_str("\nUse the `memory` tool to add new memories or manage existing ones.\n\n");
+            result.push_str("---\n");
             Ok(result)
         }
     }
